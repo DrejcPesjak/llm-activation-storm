@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Activation Storm</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Gemma Activation Observatory</p>
+          <h1>Activation Storm</h1>
+          <p class="lede">
+            Watch prompt-time activations flare across Gemma 3 like a lightning storm from orbit.
+          </p>
+        </div>
+        <div class="hero-meta">
+          <span id="status-pill" class="pill idle">Idle</span>
+          <span id="model-meta" class="meta-copy">Loading model metadata…</span>
+        </div>
+      </section>
+
+      <section class="controls">
+        <label class="field">
+          <span>Model</span>
+          <select id="model-select"></select>
+        </label>
+        <label class="field prompt-field">
+          <span>Prompt</span>
+          <textarea id="prompt-input" rows="6">Write a cinematic description of a thunderstorm seen from orbit.</textarea>
+        </label>
+        <div class="actions">
+          <button id="analyze-button" type="button">Analyze Prompt</button>
+          <button id="play-button" type="button" disabled>Play</button>
+        </div>
+      </section>
+
+      <section class="timeline">
+        <div class="timeline-header">
+          <span id="token-label">Token: —</span>
+          <span id="token-counter">0 / 0</span>
+        </div>
+        <input id="token-slider" type="range" min="0" max="0" value="0" disabled />
+        <div id="token-strip" class="token-strip"></div>
+      </section>
+
+      <section class="visualization-card">
+        <canvas id="storm-canvas"></canvas>
+        <div class="legend">
+          <span><i class="legend-dot resid"></i> Residual</span>
+          <span><i class="legend-dot attn"></i> Attention</span>
+          <span><i class="legend-dot mlp"></i> MLP</span>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>
