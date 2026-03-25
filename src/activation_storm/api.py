@@ -28,7 +28,11 @@ class ActivationStormApp:
             raise ValueError("model_id is required.")
         if model_id not in self.registry:
             raise ValueError(f"Unknown model_id: {model_id}")
-        return self.registry[model_id].analyze_prompt(prompt).to_dict()
+        include_special_tokens = bool(payload.get("include_special_tokens", False))
+        return self.registry[model_id].analyze_prompt(
+            prompt,
+            include_special_tokens=include_special_tokens,
+        ).to_dict()
 
 
 class ActivationStormHandler(BaseHTTPRequestHandler):

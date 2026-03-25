@@ -18,7 +18,7 @@ class FakeAdapter:
             stage_sequence=['attn_out', 'resid_after_attn', 'mlp_out', 'resid_after_mlp'],
         )
 
-    def analyze_prompt(self, prompt: str) -> FlowAnalysisResult:
+    def analyze_prompt(self, prompt: str, include_special_tokens: bool = False) -> FlowAnalysisResult:
         if not prompt.strip():
             raise ValueError('Prompt must not be empty.')
         return FlowAnalysisResult(

@@ -32,7 +32,7 @@ class Gemma3Adapter:
     def model_info(self) -> ModelInfo:
         return self._model_info
 
-    def analyze_prompt(self, prompt: str) -> FlowAnalysisResult:
+    def analyze_prompt(self, prompt: str, include_special_tokens: bool = False) -> FlowAnalysisResult:
         clean_prompt = prompt.strip()
         if not clean_prompt:
             raise ValueError("Prompt must not be empty.")
@@ -43,13 +43,18 @@ class Gemma3Adapter:
             tokenized = self._tokenize_prompt(clean_prompt)
             input_ids = tokenized["input_ids"]
             attention_mask = tokenized["attention_mask"]
-            content_positions, token_limit_applied = self._content_positions(clean_prompt, input_ids[0])
-            if not content_positions:
-                raise ValueError("Prompt did not produce any content tokens.")
+            positions, token_limit_applied = self._visible_positions(
+                prompt=clean_prompt,
+                input_ids=input_ids[0],
+                attention_mask=attention_mask[0],
+                include_special_tokens=include_special_tokens,
+            )
+            if not positions:
+                raise ValueError("Prompt did not produce any visible tokens.")
 
-            visible_ids = input_ids[0, content_positions].detach().cpu().tolist()
+            visible_ids = input_ids[0, positions].detach().cpu().tolist()
             tokens = [self._display_token(token_id) for token_id in visible_ids]
-            positions = torch.tensor(content_positions, dtype=torch.long)
+            positions_tensor = torch.tensor(positions, dtype=torch.long)
             sink: dict[int, dict[str, torch.Tensor]] = {}
 
             handles = build_stage_hooks(self._layers(), sink)
@@ -62,7 +67,7 @@ class Gemma3Adapter:
 
             steps = build_flow_steps(
                 sink=sink,
-                positions=positions,
+                positions=positions_tensor,
                 hidden_width=self._model_info.layer_width,
                 step_factory=FlowStep,
             )
@@ -111,19 +116,31 @@ class Gemma3Adapter:
             add_special_tokens=True,
         )
 
-    def _content_positions(self, prompt: str, input_ids: torch.Tensor) -> tuple[list[int], bool]:
-        prefix_ids = self._tokenizer("<start_of_turn>user\n", add_special_tokens=False)["input_ids"]
-        prompt_ids = self._tokenizer(prompt, add_special_tokens=False)["input_ids"]
-        start = 1 + len(prefix_ids)
-        available = max(int(input_ids.shape[0]) - start - 5, 0)
-        visible_len = min(len(prompt_ids), available, self.max_visible_tokens)
-        end = start + visible_len
-        return list(range(start, end)), visible_len < len(prompt_ids)
+    def _visible_positions(
+        self,
+        prompt: str,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        include_special_tokens: bool,
+    ) -> tuple[list[int], bool]:
+        if include_special_tokens:
+            visible_positions = list(range(int(attention_mask.sum().item())))
+        else:
+            prefix_ids = self._tokenizer("<start_of_turn>user\n", add_special_tokens=False)["input_ids"]
+            prompt_ids = self._tokenizer(prompt, add_special_tokens=False)["input_ids"]
+            start = 1 + len(prefix_ids)
+            available = max(int(input_ids.shape[0]) - start - 5, 0)
+            end = start + min(len(prompt_ids), available)
+            visible_positions = list(range(start, end))
+
+        token_limit_applied = len(visible_positions) > self.max_visible_tokens
+        return visible_positions[: self.max_visible_tokens], token_limit_applied
 
     def _display_token(self, token_id: int) -> str:
         text = self._tokenizer.decode([token_id], skip_special_tokens=False)
         text = text.replace("\n", "\\n")
         return text if text else " "
+
 
     def _strip_vision_modules(self) -> None:
         model = self._model

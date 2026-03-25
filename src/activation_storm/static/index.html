@@ -37,6 +37,21 @@
         </div>
       </section>
 
+      <section class="filters">
+        <div class="field">
+          <span>Show Stages</span>
+          <div class="toggle-group">
+            <label class="toggle-pill"><input id="toggle-attn" type="checkbox" checked /> <span>Attn</span></label>
+            <label class="toggle-pill"><input id="toggle-resid" type="checkbox" checked /> <span>Resid</span></label>
+            <label class="toggle-pill"><input id="toggle-mlp" type="checkbox" checked /> <span>MLP</span></label>
+          </div>
+        </div>
+        <div class="field">
+          <span>Token Axis</span>
+          <label class="toggle-pill single-toggle"><input id="toggle-special" type="checkbox" /> <span>Include special tokens</span></label>
+        </div>
+      </section>
+
       <section class="timeline">
         <div class="timeline-header">
           <span id="step-label">Step: —</span>
@@ -50,9 +65,8 @@
       <section class="visualization-card">
         <canvas id="storm-canvas"></canvas>
         <div class="legend">
-          <span><i class="legend-dot positive"></i> Positive activation</span>
-          <span><i class="legend-dot negative"></i> Negative activation</span>
-          <span><i class="legend-dot active"></i> Active stage</span>
+          <span><i class="legend-dot positive"></i> Cyan means positive activation.</span>
+          <span><i class="legend-dot negative"></i> Pink means negative activation.</span>
         </div>
       </section>
     </main>

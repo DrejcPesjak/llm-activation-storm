@@ -1,7 +1,8 @@
 const state = {
   payload: null,
-  textures: [],
-  stepIndex: 0,
+  allTextures: [],
+  visibleTextures: [],
+  visibleIndex: 0,
   playing: false,
   timer: null,
 };
@@ -19,17 +20,45 @@ const elements = {
   statusPill: document.getElementById("status-pill"),
   modelMeta: document.getElementById("model-meta"),
   canvas: document.getElementById("storm-canvas"),
+  toggleAttn: document.getElementById("toggle-attn"),
+  toggleResid: document.getElementById("toggle-resid"),
+  toggleMlp: document.getElementById("toggle-mlp"),
+  toggleSpecial: document.getElementById("toggle-special"),
 };
 
 const POSITIVE = [94, 234, 212];
 const NEGATIVE = [249, 168, 212];
 const ACTIVE = "#fef08a";
+const STAGE_FAMILY = {
+  attn_out: "attn",
+  resid_after_attn: "resid",
+  mlp_out: "mlp",
+  resid_after_mlp: "resid",
+};
 
 async function fetchJson(url, options = {}) {
-  const response = await fetch(url, options);
-  const payload = await response.json();
+  let response;
+  try {
+    response = await fetch(url, options);
+  } catch (error) {
+    throw new Error(`Network request failed for ${url}. Check that the local server is still running.`);
+  }
+
+  const raw = await response.text();
+  let payload = {};
+  if (raw) {
+    try {
+      payload = JSON.parse(raw);
+    } catch (_error) {
+      if (!response.ok) {
+        throw new Error(`Request failed with HTTP ${response.status}.`);
+      }
+      throw new Error(`Invalid JSON response from ${url}.`);
+    }
+  }
+
   if (!response.ok) {
-    throw new Error(payload.error || "Request failed");
+    throw new Error(payload.error || `Request failed with HTTP ${response.status}.`);
   }
   return payload;
 }
@@ -48,6 +77,25 @@ function stopPlayback() {
   }
 }
 
+function selectedFamilies() {
+  return {
+    attn: elements.toggleAttn.checked,
+    resid: elements.toggleResid.checked,
+    mlp: elements.toggleMlp.checked,
+  };
+}
+
+function activeTexture() {
+  if (!state.visibleTextures.length) {
+    return null;
+  }
+  return state.visibleTextures[state.visibleIndex];
+}
+
+function familyForStep(step) {
+  return STAGE_FAMILY[step.stage_id] || "resid";
+}
+
 function base64ToBytes(base64) {
   const binary = window.atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -58,11 +106,12 @@ function base64ToBytes(base64) {
 }
 
 function lerpColor(base, magnitude) {
-  const boost = Math.pow(magnitude, 0.8);
+  const eased = Math.pow(magnitude, 0.75);
+  const floor = 8;
   return [
-    Math.round(base[0] + (255 - base[0]) * boost),
-    Math.round(base[1] + (255 - base[1]) * boost),
-    Math.round(base[2] + (255 - base[2]) * boost),
+    Math.round(floor + (base[0] - floor) * eased),
+    Math.round(floor + (base[1] - floor) * eased),
+    Math.round(floor + (base[2] - floor) * eased),
   ];
 }
 
@@ -95,7 +144,7 @@ function createTexture(step) {
   }
 
   context.putImageData(image, 0, 0);
-  return { ...step, canvas, hotspots, bytes };
+  return { ...step, canvas, hotspots };
 }
 
 function resizeCanvas() {
@@ -122,21 +171,57 @@ function renderTokenStrip() {
   });
 }
 
-function setStep(index) {
-  if (!state.payload) {
+function updateVisibleSteps(preferredStepIndex = null) {
+  const families = selectedFamilies();
+  const active = activeTexture();
+  const keepStepIndex = preferredStepIndex ?? (active ? active.step_index : null);
+
+  state.visibleTextures = state.allTextures.filter((step) => families[familyForStep(step)]);
+
+  if (!state.visibleTextures.length) {
+    state.visibleIndex = 0;
+    elements.stepSlider.disabled = true;
+    elements.playButton.disabled = true;
+    elements.stepLabel.textContent = "Step: Select at least one stage family";
+    elements.stepCounter.textContent = "0 / 0";
+    render();
     return;
   }
 
-  state.stepIndex = Math.max(0, Math.min(index, state.textures.length - 1));
-  elements.stepSlider.value = String(state.stepIndex);
-  const step = state.textures[state.stepIndex];
+  const matchedIndex = state.visibleTextures.findIndex((step) => step.step_index === keepStepIndex);
+  state.visibleIndex = matchedIndex >= 0 ? matchedIndex : 0;
+  elements.stepSlider.disabled = false;
+  elements.playButton.disabled = false;
+  elements.stepSlider.max = String(Math.max(state.visibleTextures.length - 1, 0));
+  elements.stepSlider.value = String(state.visibleIndex);
+  updateStepLabel();
+  render();
+}
+
+function updateStepLabel() {
+  const step = activeTexture();
+  if (!step) {
+    elements.stepLabel.textContent = "Step: —";
+    elements.stepCounter.textContent = "0 / 0";
+    return;
+  }
   elements.stepLabel.textContent = `Step: Layer ${step.layer_index + 1} • ${step.stage_label}`;
-  elements.stepCounter.textContent = `${state.stepIndex + 1} / ${state.textures.length}`;
+  elements.stepCounter.textContent = `${state.visibleIndex + 1} / ${state.visibleTextures.length}`;
+}
+
+function setVisibleStep(index) {
+  if (!state.visibleTextures.length) {
+    return;
+  }
+
+  state.visibleIndex = Math.max(0, Math.min(index, state.visibleTextures.length - 1));
+  elements.stepSlider.value = String(state.visibleIndex);
+  updateStepLabel();
   render();
 }
 
 function togglePlayback() {
-  if (!state.payload) {
+  if (!state.visibleTextures.length) {
     return;
   }
 
@@ -148,8 +233,8 @@ function togglePlayback() {
   state.playing = true;
   elements.playButton.textContent = "Pause";
   state.timer = window.setInterval(() => {
-    const nextIndex = (state.stepIndex + 1) % state.textures.length;
-    setStep(nextIndex);
+    const nextIndex = (state.visibleIndex + 1) % state.visibleTextures.length;
+    setVisibleStep(nextIndex);
   }, 260);
 }
 
@@ -178,7 +263,9 @@ function panelX(index, overview) {
 }
 
 function drawOverview(context, overview) {
-  const steps = state.textures;
+  const steps = state.allTextures;
+  const active = activeTexture();
+  const families = selectedFamilies();
   const stagesPerLayer = state.payload.model.stage_sequence.length;
   const totalGap = (steps.length - 1) * 2 + (state.payload.model.layer_count - 1) * 7;
   overview.unitWidth = Math.max((overview.width - totalGap) / steps.length, 3.5);
@@ -192,8 +279,9 @@ function drawOverview(context, overview) {
     const y = overview.y + 24;
     const width = overview.unitWidth;
     const height = overview.height - 36;
+    const enabled = families[familyForStep(step)];
 
-    context.globalAlpha = index === state.stepIndex ? 1 : 0.3;
+    context.globalAlpha = active && step.step_index === active.step_index ? 1 : enabled ? 0.32 : 0.08;
     context.imageSmoothingEnabled = false;
     context.drawImage(step.canvas, x, y, width, height);
 
@@ -211,14 +299,16 @@ function drawOverview(context, overview) {
     }
   });
 
-  const activeX = panelX(state.stepIndex, overview);
-  const activeWidth = overview.unitWidth;
-  context.globalAlpha = 1;
-  context.shadowColor = ACTIVE;
-  context.shadowBlur = 20;
-  context.strokeStyle = ACTIVE;
-  context.lineWidth = 2;
-  context.strokeRect(activeX - 2, overview.y + 20, activeWidth + 4, overview.height - 28);
+  if (active) {
+    const activeX = panelX(active.step_index, overview);
+    const activeWidth = overview.unitWidth;
+    context.globalAlpha = 1;
+    context.shadowColor = ACTIVE;
+    context.shadowBlur = 20;
+    context.strokeStyle = ACTIVE;
+    context.lineWidth = 2;
+    context.strokeRect(activeX - 2, overview.y + 20, activeWidth + 4, overview.height - 28);
+  }
   context.restore();
 }
 
@@ -231,7 +321,7 @@ function drawHotspots(context, detail, step) {
   const count = Math.min(140, step.hotspots.length);
 
   for (let index = 0; index < count; index += 1) {
-    const hotspot = step.hotspots[(index * 29 + state.stepIndex * 17) % step.hotspots.length];
+    const hotspot = step.hotspots[(index * 29 + step.step_index * 17) % step.hotspots.length];
     const baseX = detail.x + ((hotspot.x + 0.5) / step.cols) * detail.width;
     const baseY = detail.y + ((hotspot.y + 0.5) / Math.max(step.rows, 1)) * detail.height;
     const color = hotspot.norm >= 0 ? "rgba(94, 234, 212, 0.34)" : "rgba(249, 168, 212, 0.34)";
@@ -249,7 +339,14 @@ function drawHotspots(context, detail, step) {
 }
 
 function drawDetail(context, detail) {
-  const step = state.textures[state.stepIndex];
+  const step = activeTexture();
+  if (!step) {
+    context.fillStyle = "rgba(228, 243, 255, 0.56)";
+    context.font = "500 18px IBM Plex Sans";
+    context.fillText("Enable at least one stage family to inspect a slice.", 28, detail.y + 18);
+    return;
+  }
+
   context.save();
   context.fillStyle = "rgba(10, 24, 41, 0.72)";
   context.fillRect(detail.x - 1, detail.y - 1, detail.width + 2, detail.height + 2);
@@ -264,11 +361,13 @@ function drawDetail(context, detail) {
   context.fillStyle = "rgba(169, 207, 241, 0.72)";
   context.fillText(`${step.rows} tokens × ${step.cols} hidden dims`, detail.x, detail.y + detail.height + 18);
 
-  const tokenLabelCount = Math.min(state.payload.tokens.length, 12);
+  const tokenLabelCount = state.payload.tokens.length;
+  const fontSize = Math.max(9, Math.min(13, 15 - tokenLabelCount * 0.18));
+  context.font = `${fontSize}px IBM Plex Sans`;
   for (let index = 0; index < tokenLabelCount; index += 1) {
     const y = detail.y + ((index + 0.5) / tokenLabelCount) * detail.height;
-    context.fillStyle = "rgba(212, 233, 255, 0.5)";
-    context.fillText(state.payload.tokens[index], detail.x - 92, y + 4);
+    context.fillStyle = "rgba(212, 233, 255, 0.64)";
+    context.fillText(state.payload.tokens[index], detail.x - 108, y + fontSize * 0.32);
   }
   context.restore();
 }
@@ -288,18 +387,21 @@ function render() {
     return;
   }
 
+  const tokenCount = state.payload.tokens.length;
+  const detailHeight = Math.min(height * 0.58, Math.max(height * 0.4, tokenCount * 22));
+  const detailTop = height - detailHeight - 54;
   const overview = {
     x: 24,
     y: 28,
     width: width - 48,
-    height: height * 0.34,
+    height: Math.max(180, detailTop - 58),
     unitWidth: 0,
   };
   const detail = {
-    x: 118,
-    y: height * 0.47,
-    width: width - 154,
-    height: height * 0.4,
+    x: 136,
+    y: detailTop,
+    width: width - 172,
+    height: detailHeight,
   };
 
   drawOverview(context, overview);
@@ -318,7 +420,7 @@ async function loadModels() {
   elements.modelSelect.value = payload.default_model;
   const active = payload.models.find((model) => model.id === payload.default_model);
   if (active) {
-    elements.modelMeta.textContent = `${active.label} • ${active.layer_count} layers • width ${active.layer_width} • ${active.stage_sequence.join(" → ")}`;
+    elements.modelMeta.textContent = `${active.label} • ${active.layer_count} layers • width ${active.layer_width}`;
   }
 }
 
@@ -334,19 +436,17 @@ async function analyzePrompt() {
       body: JSON.stringify({
         model_id: elements.modelSelect.value,
         prompt: elements.promptInput.value,
+        include_special_tokens: elements.toggleSpecial.checked,
       }),
     });
 
     state.payload = payload;
-    state.textures = payload.steps.map(createTexture);
-    elements.stepSlider.disabled = false;
-    elements.playButton.disabled = false;
-    elements.stepSlider.max = String(Math.max(state.textures.length - 1, 0));
-    elements.analysisNote.textContent = payload.token_limit_applied
-      ? `Showing the first ${payload.tokens.length} content tokens for the dense flow view.`
-      : `${payload.tokens.length} content tokens across ${payload.steps.length} stage steps.`;
+    state.allTextures = payload.steps.map(createTexture);
     renderTokenStrip();
-    setStep(0);
+    elements.analysisNote.textContent = payload.token_limit_applied
+      ? `Showing the first ${payload.tokens.length} visible tokens${elements.toggleSpecial.checked ? " including special tokens" : ""}.`
+      : `${payload.tokens.length} visible tokens across ${payload.steps.length} stage steps${elements.toggleSpecial.checked ? ", including special tokens" : ""}.`;
+    updateVisibleSteps();
     setStatus("Ready", "ready");
   } catch (error) {
     setStatus("Error", "busy");
@@ -354,7 +454,8 @@ async function analyzePrompt() {
     elements.stepCounter.textContent = "0 / 0";
     elements.analysisNote.textContent = "";
     state.payload = null;
-    state.textures = [];
+    state.allTextures = [];
+    state.visibleTextures = [];
     render();
   } finally {
     elements.analyzeButton.disabled = false;
@@ -364,7 +465,19 @@ async function analyzePrompt() {
 elements.analyzeButton.addEventListener("click", analyzePrompt);
 elements.playButton.addEventListener("click", togglePlayback);
 elements.stepSlider.addEventListener("input", (event) => {
-  setStep(Number(event.target.value));
+  setVisibleStep(Number(event.target.value));
+});
+[elements.toggleAttn, elements.toggleResid, elements.toggleMlp].forEach((toggle) => {
+  toggle.addEventListener("change", () => {
+    stopPlayback();
+    updateVisibleSteps();
+  });
+});
+elements.toggleSpecial.addEventListener("change", () => {
+  stopPlayback();
+  if (state.payload) {
+    analyzePrompt();
+  }
 });
 window.addEventListener("resize", resizeCanvas);
 
