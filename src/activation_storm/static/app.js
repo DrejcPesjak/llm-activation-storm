@@ -1,6 +1,7 @@
 const state = {
   payload: null,
-  tokenIndex: 0,
+  textures: [],
+  stepIndex: 0,
   playing: false,
   timer: null,
 };
@@ -10,20 +11,19 @@ const elements = {
   promptInput: document.getElementById("prompt-input"),
   analyzeButton: document.getElementById("analyze-button"),
   playButton: document.getElementById("play-button"),
-  tokenSlider: document.getElementById("token-slider"),
-  tokenLabel: document.getElementById("token-label"),
-  tokenCounter: document.getElementById("token-counter"),
+  stepSlider: document.getElementById("step-slider"),
+  stepLabel: document.getElementById("step-label"),
+  stepCounter: document.getElementById("step-counter"),
   tokenStrip: document.getElementById("token-strip"),
+  analysisNote: document.getElementById("analysis-note"),
   statusPill: document.getElementById("status-pill"),
   modelMeta: document.getElementById("model-meta"),
   canvas: document.getElementById("storm-canvas"),
 };
 
-const FAMILY_COLORS = {
-  resid: "#5eead4",
-  attn: "#7dd3fc",
-  mlp: "#f9a8d4",
-};
+const POSITIVE = [94, 234, 212];
+const NEGATIVE = [249, 168, 212];
+const ACTIVE = "#fef08a";
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, options);
@@ -37,6 +37,65 @@ async function fetchJson(url, options = {}) {
 function setStatus(label, className) {
   elements.statusPill.textContent = label;
   elements.statusPill.className = `pill ${className}`;
+}
+
+function stopPlayback() {
+  state.playing = false;
+  elements.playButton.textContent = "Play";
+  if (state.timer) {
+    window.clearInterval(state.timer);
+    state.timer = null;
+  }
+}
+
+function base64ToBytes(base64) {
+  const binary = window.atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function lerpColor(base, magnitude) {
+  const boost = Math.pow(magnitude, 0.8);
+  return [
+    Math.round(base[0] + (255 - base[0]) * boost),
+    Math.round(base[1] + (255 - base[1]) * boost),
+    Math.round(base[2] + (255 - base[2]) * boost),
+  ];
+}
+
+function createTexture(step) {
+  const bytes = base64ToBytes(step.encoded_field);
+  const canvas = document.createElement("canvas");
+  canvas.width = step.cols;
+  canvas.height = step.rows;
+  const context = canvas.getContext("2d", { willReadFrequently: false });
+  const image = context.createImageData(step.cols, step.rows);
+  const hotspots = [];
+
+  for (let offset = 0; offset < bytes.length; offset += 1) {
+    const byte = bytes[offset];
+    const norm = (byte / 127.5) - 1;
+    const magnitude = Math.abs(norm);
+    const base = norm >= 0 ? POSITIVE : NEGATIVE;
+    const [r, g, b] = lerpColor(base, magnitude);
+    const pixel = offset * 4;
+    image.data[pixel] = r;
+    image.data[pixel + 1] = g;
+    image.data[pixel + 2] = b;
+    image.data[pixel + 3] = Math.max(18, Math.round(255 * magnitude));
+
+    if (magnitude > 0.84 && offset % 11 === 0) {
+      const x = offset % step.cols;
+      const y = Math.floor(offset / step.cols);
+      hotspots.push({ x, y, norm, magnitude });
+    }
+  }
+
+  context.putImageData(image, 0, 0);
+  return { ...step, canvas, hotspots, bytes };
 }
 
 function resizeCanvas() {
@@ -55,36 +114,25 @@ function renderTokenStrip() {
     return;
   }
 
-  state.payload.tokens.forEach((token, index) => {
+  state.payload.tokens.forEach((token) => {
     const chip = document.createElement("span");
-    chip.className = `token-chip ${index === state.tokenIndex ? "active" : ""}`;
+    chip.className = "token-chip";
     chip.textContent = token === " " ? "␠" : token;
-    chip.addEventListener("click", () => setToken(index));
     elements.tokenStrip.appendChild(chip);
   });
 }
 
-function setToken(index) {
+function setStep(index) {
   if (!state.payload) {
     return;
   }
 
-  state.tokenIndex = Math.max(0, Math.min(index, state.payload.frames.length - 1));
-  elements.tokenSlider.value = String(state.tokenIndex);
-  const tokenText = state.payload.tokens[state.tokenIndex] || "—";
-  elements.tokenLabel.textContent = `Token: ${tokenText}`;
-  elements.tokenCounter.textContent = `${state.tokenIndex + 1} / ${state.payload.tokens.length}`;
-  renderTokenStrip();
+  state.stepIndex = Math.max(0, Math.min(index, state.textures.length - 1));
+  elements.stepSlider.value = String(state.stepIndex);
+  const step = state.textures[state.stepIndex];
+  elements.stepLabel.textContent = `Step: Layer ${step.layer_index + 1} • ${step.stage_label}`;
+  elements.stepCounter.textContent = `${state.stepIndex + 1} / ${state.textures.length}`;
   render();
-}
-
-function stopPlayback() {
-  state.playing = false;
-  elements.playButton.textContent = "Play";
-  if (state.timer) {
-    window.clearInterval(state.timer);
-    state.timer = null;
-  }
 }
 
 function togglePlayback() {
@@ -100,74 +148,129 @@ function togglePlayback() {
   state.playing = true;
   elements.playButton.textContent = "Pause";
   state.timer = window.setInterval(() => {
-    const nextIndex = (state.tokenIndex + 1) % state.payload.frames.length;
-    setToken(nextIndex);
-  }, 440);
+    const nextIndex = (state.stepIndex + 1) % state.textures.length;
+    setStep(nextIndex);
+  }, 260);
 }
 
-function drawStormBackdrop(context, width, height) {
+function drawBackdrop(context, width, height) {
   const sky = context.createLinearGradient(0, 0, 0, height);
-  sky.addColorStop(0, "rgba(8, 20, 34, 0.9)");
-  sky.addColorStop(0.55, "rgba(2, 12, 22, 0.95)");
-  sky.addColorStop(1, "rgba(1, 8, 15, 1)");
+  sky.addColorStop(0, "rgba(6, 16, 28, 0.96)");
+  sky.addColorStop(0.55, "rgba(3, 11, 20, 0.98)");
+  sky.addColorStop(1, "rgba(1, 6, 12, 1)");
   context.fillStyle = sky;
   context.fillRect(0, 0, width, height);
 
-  const horizon = context.createRadialGradient(width * 0.5, height * 1.08, 30, width * 0.5, height * 1.08, width * 0.65);
-  horizon.addColorStop(0, "rgba(92, 135, 209, 0.45)");
-  horizon.addColorStop(0.45, "rgba(36, 76, 127, 0.18)");
-  horizon.addColorStop(1, "rgba(0, 0, 0, 0)");
-  context.fillStyle = horizon;
+  const glow = context.createRadialGradient(width * 0.5, height * 1.05, 20, width * 0.5, height * 1.05, width * 0.55);
+  glow.addColorStop(0, "rgba(105, 143, 224, 0.42)");
+  glow.addColorStop(0.45, "rgba(47, 86, 146, 0.15)");
+  glow.addColorStop(1, "rgba(0, 0, 0, 0)");
+  context.fillStyle = glow;
   context.fillRect(0, 0, width, height);
-
-  context.strokeStyle = "rgba(146, 204, 255, 0.08)";
-  for (let i = 1; i <= 8; i += 1) {
-    const y = (height / 9) * i;
-    context.beginPath();
-    context.moveTo(0, y);
-    context.lineTo(width, y);
-    context.stroke();
-  }
 }
 
-function drawFamily(context, family, values, familyIndex, width, height) {
-  const color = FAMILY_COLORS[family];
-  const laneTop = (height / 3) * familyIndex;
-  const laneHeight = height / 3;
-  const xStep = width / Math.max(values.length, 1);
+function panelX(index, overview) {
+  const stagesPerLayer = state.payload.model.stage_sequence.length;
+  const layerIndex = Math.floor(index / stagesPerLayer);
+  const gap = 2;
+  const layerGap = 7;
+  return overview.x + index * (overview.unitWidth + gap) + layerIndex * layerGap;
+}
+
+function drawOverview(context, overview) {
+  const steps = state.textures;
+  const stagesPerLayer = state.payload.model.stage_sequence.length;
+  const totalGap = (steps.length - 1) * 2 + (state.payload.model.layer_count - 1) * 7;
+  overview.unitWidth = Math.max((overview.width - totalGap) / steps.length, 3.5);
 
   context.save();
-  context.fillStyle = color;
-  context.shadowColor = color;
-  context.shadowBlur = 24;
+  context.strokeStyle = "rgba(155, 212, 255, 0.08)";
+  context.strokeRect(overview.x, overview.y, overview.width, overview.height);
 
-  values.forEach((value, layerIndex) => {
-    const x = (layerIndex + 0.5) * xStep;
-    const y = laneTop + laneHeight * (1 - value * 0.86) - laneHeight * 0.08;
-    const radius = 8 + value * 18;
-    const alpha = 0.08 + value * 0.75;
+  steps.forEach((step, index) => {
+    const x = panelX(index, overview);
+    const y = overview.y + 24;
+    const width = overview.unitWidth;
+    const height = overview.height - 36;
 
-    context.globalAlpha = alpha;
-    context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fill();
+    context.globalAlpha = index === state.stepIndex ? 1 : 0.3;
+    context.imageSmoothingEnabled = false;
+    context.drawImage(step.canvas, x, y, width, height);
 
-    if (value > 0.2) {
-      context.lineWidth = 1 + value * 2.4;
-      context.strokeStyle = color;
-      context.globalAlpha = alpha * 0.55;
-      context.beginPath();
-      context.moveTo(x, laneTop + laneHeight + 6);
-      context.lineTo(x + (Math.sin(layerIndex) * 14), y);
-      context.stroke();
+    if ((index + 1) % stagesPerLayer === 0 && index < steps.length - 1) {
+      context.globalAlpha = 1;
+      context.fillStyle = "rgba(149, 192, 255, 0.08)";
+      context.fillRect(x + width + 3, y - 10, 1, height + 20);
+    }
+
+    if (index % stagesPerLayer === 0) {
+      context.globalAlpha = 1;
+      context.fillStyle = "rgba(228, 243, 255, 0.52)";
+      context.font = "11px IBM Plex Sans";
+      context.fillText(`L${String(step.layer_index + 1).padStart(2, "0")}`, x, overview.y + 14);
     }
   });
 
+  const activeX = panelX(state.stepIndex, overview);
+  const activeWidth = overview.unitWidth;
+  context.globalAlpha = 1;
+  context.shadowColor = ACTIVE;
+  context.shadowBlur = 20;
+  context.strokeStyle = ACTIVE;
+  context.lineWidth = 2;
+  context.strokeRect(activeX - 2, overview.y + 20, activeWidth + 4, overview.height - 28);
   context.restore();
+}
 
-  context.fillStyle = "rgba(229, 243, 255, 0.7)";
-  context.font = "600 14px IBM Plex Sans";
-  context.fillText(family.toUpperCase(), 18, laneTop + 22);
+function drawHotspots(context, detail, step) {
+  if (!step.hotspots.length) {
+    return;
+  }
+
+  context.save();
+  const count = Math.min(140, step.hotspots.length);
+
+  for (let index = 0; index < count; index += 1) {
+    const hotspot = step.hotspots[(index * 29 + state.stepIndex * 17) % step.hotspots.length];
+    const baseX = detail.x + ((hotspot.x + 0.5) / step.cols) * detail.width;
+    const baseY = detail.y + ((hotspot.y + 0.5) / Math.max(step.rows, 1)) * detail.height;
+    const color = hotspot.norm >= 0 ? "rgba(94, 234, 212, 0.34)" : "rgba(249, 168, 212, 0.34)";
+    const radius = 1.2 + hotspot.magnitude * 3.8;
+
+    context.fillStyle = color;
+    context.shadowColor = color;
+    context.shadowBlur = 10 + hotspot.magnitude * 10;
+    context.beginPath();
+    context.arc(baseX, baseY, radius, 0, Math.PI * 2);
+    context.fill();
+  }
+
+  context.restore();
+}
+
+function drawDetail(context, detail) {
+  const step = state.textures[state.stepIndex];
+  context.save();
+  context.fillStyle = "rgba(10, 24, 41, 0.72)";
+  context.fillRect(detail.x - 1, detail.y - 1, detail.width + 2, detail.height + 2);
+  context.imageSmoothingEnabled = false;
+  context.drawImage(step.canvas, detail.x, detail.y, detail.width, detail.height);
+  drawHotspots(context, detail, step);
+
+  context.fillStyle = "rgba(228, 243, 255, 0.92)";
+  context.font = "600 18px IBM Plex Sans";
+  context.fillText(`Layer ${step.layer_index + 1} • ${step.stage_label}`, detail.x, detail.y - 18);
+  context.font = "12px IBM Plex Sans";
+  context.fillStyle = "rgba(169, 207, 241, 0.72)";
+  context.fillText(`${step.rows} tokens × ${step.cols} hidden dims`, detail.x, detail.y + detail.height + 18);
+
+  const tokenLabelCount = Math.min(state.payload.tokens.length, 12);
+  for (let index = 0; index < tokenLabelCount; index += 1) {
+    const y = detail.y + ((index + 0.5) / tokenLabelCount) * detail.height;
+    context.fillStyle = "rgba(212, 233, 255, 0.5)";
+    context.fillText(state.payload.tokens[index], detail.x - 92, y + 4);
+  }
+  context.restore();
 }
 
 function render() {
@@ -176,19 +279,31 @@ function render() {
   const height = elements.canvas.clientHeight;
 
   context.clearRect(0, 0, width, height);
-  drawStormBackdrop(context, width, height);
+  drawBackdrop(context, width, height);
 
   if (!state.payload) {
-    context.fillStyle = "rgba(229, 243, 255, 0.55)";
-    context.font = "500 18px IBM Plex Sans";
-    context.fillText("Run a prompt to render the storm.", 24, 36);
+    context.fillStyle = "rgba(228, 243, 255, 0.56)";
+    context.font = "500 20px IBM Plex Sans";
+    context.fillText("Run a prompt to map the layer-by-layer flow.", 28, 42);
     return;
   }
 
-  const frame = state.payload.frames[state.tokenIndex];
-  state.payload.families.forEach((family, index) => {
-    drawFamily(context, family, frame.values[family], index, width, height);
-  });
+  const overview = {
+    x: 24,
+    y: 28,
+    width: width - 48,
+    height: height * 0.34,
+    unitWidth: 0,
+  };
+  const detail = {
+    x: 118,
+    y: height * 0.47,
+    width: width - 154,
+    height: height * 0.4,
+  };
+
+  drawOverview(context, overview);
+  drawDetail(context, detail);
 }
 
 async function loadModels() {
@@ -203,7 +318,7 @@ async function loadModels() {
   elements.modelSelect.value = payload.default_model;
   const active = payload.models.find((model) => model.id === payload.default_model);
   if (active) {
-    elements.modelMeta.textContent = `${active.label} • ${active.layer_count} layers • width ${active.layer_width}`;
+    elements.modelMeta.textContent = `${active.label} • ${active.layer_count} layers • width ${active.layer_width} • ${active.stage_sequence.join(" → ")}`;
   }
 }
 
@@ -223,16 +338,23 @@ async function analyzePrompt() {
     });
 
     state.payload = payload;
-    elements.tokenSlider.disabled = false;
+    state.textures = payload.steps.map(createTexture);
+    elements.stepSlider.disabled = false;
     elements.playButton.disabled = false;
-    elements.tokenSlider.max = String(Math.max(payload.frames.length - 1, 0));
-    setToken(0);
+    elements.stepSlider.max = String(Math.max(state.textures.length - 1, 0));
+    elements.analysisNote.textContent = payload.token_limit_applied
+      ? `Showing the first ${payload.tokens.length} content tokens for the dense flow view.`
+      : `${payload.tokens.length} content tokens across ${payload.steps.length} stage steps.`;
+    renderTokenStrip();
+    setStep(0);
     setStatus("Ready", "ready");
   } catch (error) {
     setStatus("Error", "busy");
-    elements.tokenLabel.textContent = `Token: ${error.message}`;
-    elements.tokenCounter.textContent = "0 / 0";
+    elements.stepLabel.textContent = `Step: ${error.message}`;
+    elements.stepCounter.textContent = "0 / 0";
+    elements.analysisNote.textContent = "";
     state.payload = null;
+    state.textures = [];
     render();
   } finally {
     elements.analyzeButton.disabled = false;
@@ -241,8 +363,8 @@ async function analyzePrompt() {
 
 elements.analyzeButton.addEventListener("click", analyzePrompt);
 elements.playButton.addEventListener("click", togglePlayback);
-elements.tokenSlider.addEventListener("input", (event) => {
-  setToken(Number(event.target.value));
+elements.stepSlider.addEventListener("input", (event) => {
+  setStep(Number(event.target.value));
 });
 window.addEventListener("resize", resizeCanvas);
 

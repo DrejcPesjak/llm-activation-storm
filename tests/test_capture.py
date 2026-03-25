@@ -1,33 +1,54 @@
 from __future__ import annotations
 
+import base64
 import unittest
 
 import torch
 
-from activation_storm.capture import ease_matrix, normalize_family_values, tensor_rms
+from activation_storm.capture import (
+    build_flow_steps,
+    encode_signed_field,
+    select_content_rows,
+    signed_scale,
+)
+from activation_storm.types import FlowStep
 
 
 class CaptureTests(unittest.TestCase):
-    def test_tensor_rms_reduces_hidden_dimension(self):
-        values = torch.tensor([[[3.0, 4.0], [0.0, 0.0]]])
-        reduced = tensor_rms(values)
-        self.assertEqual(list(reduced.shape), [1, 2])
-        self.assertAlmostEqual(float(reduced[0, 0]), 3.5355, places=3)
+    def test_select_content_rows_uses_sequence_dimension(self):
+        values = torch.arange(24, dtype=torch.float32).reshape(1, 3, 8)
+        positions = torch.tensor([0, 2], dtype=torch.long)
+        selected = select_content_rows(values, positions)
+        self.assertEqual(list(selected.shape), [2, 8])
+        self.assertEqual(float(selected[1, 0]), 16.0)
 
-    def test_normalize_family_values_scales_per_family(self):
-        family_by_layer = {
-            "resid": {
-                0: torch.tensor([1.0, 2.0]),
-                1: torch.tensor([2.0, 4.0]),
+    def test_signed_scale_returns_positive_floor(self):
+        values = torch.zeros(2, 4)
+        self.assertEqual(signed_scale(values), 1.0)
+
+    def test_encode_signed_field_packs_bytes(self):
+        values = torch.tensor([[-1.0, 0.0, 1.0]], dtype=torch.float32)
+        encoded = encode_signed_field(values, scale=1.0)
+        decoded = list(base64.b64decode(encoded))
+        self.assertEqual(decoded, [0, 128, 255])
+
+    def test_build_flow_steps_orders_stage_sequence(self):
+        sink = {
+            0: {
+                'attn_out': torch.ones(1, 2, 4),
+                'resid_after_attn': torch.ones(1, 2, 4) * 2,
+                'mlp_out': torch.ones(1, 2, 4) * 3,
+                'resid_after_mlp': torch.ones(1, 2, 4) * 4,
             }
         }
-        normalized = normalize_family_values(family_by_layer, token_count=2, layer_count=2)
-        self.assertEqual(normalized["resid"][0], [0.25, 0.5])
-        self.assertEqual(normalized["resid"][1], [0.5, 1.0])
+        positions = torch.tensor([0, 1], dtype=torch.long)
+        steps = build_flow_steps(sink, positions, hidden_width=4, step_factory=FlowStep)
+        self.assertEqual([step.stage_id for step in steps], [
+            'attn_out', 'resid_after_attn', 'mlp_out', 'resid_after_mlp'
+        ])
+        self.assertEqual(steps[0].rows, 2)
+        self.assertEqual(steps[0].cols, 4)
 
-    def test_ease_matrix_preserves_zero_and_one(self):
-        self.assertEqual(ease_matrix([[0.0, 0.5, 1.0]]), [[0.0, 0.5, 1.0]])
 
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     unittest.main()

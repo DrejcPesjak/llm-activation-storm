@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import base64
 from collections.abc import Callable
 
 import torch
 
 
-FAMILIES = ("resid", "attn", "mlp")
-
-
-def tensor_rms(values: torch.Tensor) -> torch.Tensor:
-    return torch.sqrt(torch.mean(values.float() * values.float(), dim=-1))
+STAGE_SPECS = (
+    ("attn_out", "ATTN"),
+    ("resid_after_attn", "RESID"),
+    ("mlp_out", "MLP"),
+    ("resid_after_mlp", "RESID"),
+)
 
 
 def unwrap_tensor(output):
@@ -18,58 +20,89 @@ def unwrap_tensor(output):
     return output
 
 
-def build_layer_hooks(
-    layers,
-    sink: dict[str, dict[int, torch.Tensor]],
-    reducer: Callable[[torch.Tensor], torch.Tensor] = tensor_rms,
-):
+def _detach_hidden(tensor: torch.Tensor) -> torch.Tensor:
+    return tensor.detach().float().cpu()
+
+
+def build_stage_hooks(layers, sink: dict[int, dict[str, torch.Tensor]]):
     handles = []
 
-    def record(family: str, layer_index: int):
+    def store_output(layer_index: int, stage_id: str):
         def hook(_module, _inputs, output):
-            tensor = unwrap_tensor(output)
-            sink[family][layer_index] = reducer(tensor).detach().cpu()
+            sink[layer_index][stage_id] = _detach_hidden(unwrap_tensor(output))
             return output
 
         return hook
 
+    def store_input(layer_index: int, stage_id: str):
+        def hook(_module, inputs):
+            sink[layer_index][stage_id] = _detach_hidden(inputs[0])
+            return None
+
+        return hook
+
     for layer_index, layer in enumerate(layers):
-        handles.append(layer.register_forward_hook(record("resid", layer_index)))
-        handles.append(layer.self_attn.register_forward_hook(record("attn", layer_index)))
-        handles.append(layer.mlp.register_forward_hook(record("mlp", layer_index)))
+        sink[layer_index] = {}
+        handles.append(layer.post_attention_layernorm.register_forward_hook(store_output(layer_index, "attn_out")))
+        handles.append(
+            layer.pre_feedforward_layernorm.register_forward_pre_hook(
+                store_input(layer_index, "resid_after_attn")
+            )
+        )
+        handles.append(layer.post_feedforward_layernorm.register_forward_hook(store_output(layer_index, "mlp_out")))
+        handles.append(layer.register_forward_hook(store_output(layer_index, "resid_after_mlp")))
 
     return handles
 
 
-def normalize_family_values(
-    family_by_layer: dict[str, dict[int, torch.Tensor]],
-    token_count: int,
-    layer_count: int,
-) -> dict[str, list[list[float]]]:
-    normalized: dict[str, list[list[float]]] = {}
-
-    for family, by_layer in family_by_layer.items():
-        matrix = torch.zeros(token_count, layer_count, dtype=torch.float32)
-        for layer_index, values in by_layer.items():
-            clipped = values[:token_count].float()
-            matrix[: clipped.shape[0], layer_index] = clipped
-
-        max_value = float(matrix.max().item()) if matrix.numel() else 0.0
-        if max_value > 0:
-            matrix = matrix / max_value
-
-        normalized[family] = [
-            [round(float(matrix[token_index, layer_index].item()), 4) for layer_index in range(layer_count)]
-            for token_index in range(token_count)
-        ]
-
-    return normalized
+def select_content_rows(values: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
+    if values.ndim != 3:
+        raise ValueError(f"Expected [batch, seq, hidden] tensor, got shape {tuple(values.shape)}")
+    return values[0].index_select(0, positions)
 
 
-def smoothstep(value: float) -> float:
-    clamped = max(0.0, min(1.0, value))
-    return clamped * clamped * (3.0 - 2.0 * clamped)
+def signed_scale(values: torch.Tensor, quantile: float = 0.995) -> float:
+    flat = values.abs().reshape(-1)
+    if flat.numel() == 0:
+        return 1.0
+    scale = float(torch.quantile(flat, quantile).item())
+    return scale if scale > 1e-6 else 1.0
 
 
-def ease_matrix(matrix: list[list[float]]) -> list[list[float]]:
-    return [[round(smoothstep(value), 4) for value in row] for row in matrix]
+def encode_signed_field(values: torch.Tensor, scale: float) -> str:
+    normalized = torch.clamp(values / scale, -1.0, 1.0)
+    quantized = torch.round((normalized + 1.0) * 127.5).to(torch.uint8)
+    return base64.b64encode(quantized.numpy().tobytes()).decode("ascii")
+
+
+def build_flow_steps(
+    sink: dict[int, dict[str, torch.Tensor]],
+    positions: torch.Tensor,
+    hidden_width: int,
+    step_factory: Callable[..., object],
+) -> list[object]:
+    steps = []
+    step_index = 0
+
+    for layer_index in sorted(sink):
+        layer_data = sink[layer_index]
+        for stage_id, stage_label in STAGE_SPECS:
+            if stage_id not in layer_data:
+                raise RuntimeError(f"Missing stage '{stage_id}' for layer {layer_index}")
+            field = select_content_rows(layer_data[stage_id], positions)
+            scale = signed_scale(field)
+            steps.append(
+                step_factory(
+                    step_index=step_index,
+                    layer_index=layer_index,
+                    stage_id=stage_id,
+                    stage_label=stage_label,
+                    rows=int(field.shape[0]),
+                    cols=hidden_width,
+                    scale=round(scale, 6),
+                    encoded_field=encode_signed_field(field, scale),
+                )
+            )
+            step_index += 1
+
+    return steps

@@ -9,35 +9,42 @@ class ModelInfo:
     label: str
     layer_count: int
     layer_width: int
-    families: list[str]
+    stage_sequence: list[str]
 
     def to_dict(self) -> dict:
         return asdict(self)
 
 
 @dataclass(frozen=True)
-class ActivationFrame:
-    token_index: int
-    token_text: str
-    values: dict[str, list[float]]
+class FlowStep:
+    step_index: int
+    layer_index: int
+    stage_id: str
+    stage_label: str
+    rows: int
+    cols: int
+    scale: float
+    encoded_field: str
 
     def to_dict(self) -> dict:
         return asdict(self)
 
 
 @dataclass(frozen=True)
-class AnalysisResult:
+class FlowAnalysisResult:
     model: ModelInfo
     tokens: list[str]
-    layers: list[str]
-    families: list[str]
-    frames: list[ActivationFrame]
+    hidden_width: int
+    token_limit: int
+    token_limit_applied: bool
+    steps: list[FlowStep]
 
     def to_dict(self) -> dict:
         return {
             "model": self.model.to_dict(),
             "tokens": self.tokens,
-            "layers": self.layers,
-            "families": self.families,
-            "frames": [frame.to_dict() for frame in self.frames],
+            "hidden_width": self.hidden_width,
+            "token_limit": self.token_limit,
+            "token_limit_applied": self.token_limit_applied,
+            "steps": [step.to_dict() for step in self.steps],
         }

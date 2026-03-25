@@ -2,28 +2,18 @@ from __future__ import annotations
 
 import gc
 import threading
-from abc import ABC, abstractmethod
 
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
-from .capture import FAMILIES, build_layer_hooks, ease_matrix, normalize_family_values
-from .types import ActivationFrame, AnalysisResult, ModelInfo
+from .capture import STAGE_SPECS, build_flow_steps, build_stage_hooks
+from .types import FlowAnalysisResult, FlowStep, ModelInfo
 
 
-class ModelAdapter(ABC):
-    @abstractmethod
-    def model_info(self) -> ModelInfo:
-        raise NotImplementedError
-
-    @abstractmethod
-    def analyze_prompt(self, prompt: str) -> AnalysisResult:
-        raise NotImplementedError
-
-
-class Gemma3Adapter(ModelAdapter):
+class Gemma3Adapter:
     model_id = "google/gemma-3-4b-it"
     label = "Gemma 3 4B IT"
+    max_visible_tokens = 24
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -36,13 +26,13 @@ class Gemma3Adapter(ModelAdapter):
             label=self.label,
             layer_count=int(text_config.num_hidden_layers),
             layer_width=int(text_config.hidden_size),
-            families=list(FAMILIES),
+            stage_sequence=[stage_id for stage_id, _label in STAGE_SPECS],
         )
 
     def model_info(self) -> ModelInfo:
         return self._model_info
 
-    def analyze_prompt(self, prompt: str) -> AnalysisResult:
+    def analyze_prompt(self, prompt: str) -> FlowAnalysisResult:
         clean_prompt = prompt.strip()
         if not clean_prompt:
             raise ValueError("Prompt must not be empty.")
@@ -53,15 +43,16 @@ class Gemma3Adapter(ModelAdapter):
             tokenized = self._tokenize_prompt(clean_prompt)
             input_ids = tokenized["input_ids"]
             attention_mask = tokenized["attention_mask"]
-            content_positions = self._content_positions(clean_prompt, input_ids[0])
+            content_positions, token_limit_applied = self._content_positions(clean_prompt, input_ids[0])
             if not content_positions:
                 raise ValueError("Prompt did not produce any content tokens.")
 
             visible_ids = input_ids[0, content_positions].detach().cpu().tolist()
             tokens = [self._display_token(token_id) for token_id in visible_ids]
-            sink = {family: {} for family in FAMILIES}
+            positions = torch.tensor(content_positions, dtype=torch.long)
+            sink: dict[int, dict[str, torch.Tensor]] = {}
 
-            handles = build_layer_hooks(self._layers(), sink)
+            handles = build_stage_hooks(self._layers(), sink)
             try:
                 with torch.inference_mode():
                     self._model(input_ids=input_ids, attention_mask=attention_mask)
@@ -69,37 +60,20 @@ class Gemma3Adapter(ModelAdapter):
                 for handle in handles:
                     handle.remove()
 
-            token_count = len(content_positions)
-            positions = torch.tensor(content_positions, dtype=torch.long)
-            filtered = {
-                family: {
-                    layer_index: family_values[0].index_select(0, positions)
-                    for layer_index, family_values in by_layer.items()
-                }
-                for family, by_layer in sink.items()
-            }
-            normalized = normalize_family_values(
-                filtered,
-                token_count=token_count,
-                layer_count=self._model_info.layer_count,
+            steps = build_flow_steps(
+                sink=sink,
+                positions=positions,
+                hidden_width=self._model_info.layer_width,
+                step_factory=FlowStep,
             )
-            softened = {family: ease_matrix(matrix) for family, matrix in normalized.items()}
 
-        frames = [
-            ActivationFrame(
-                token_index=token_index,
-                token_text=tokens[token_index],
-                values={family: softened[family][token_index] for family in FAMILIES},
-            )
-            for token_index in range(token_count)
-        ]
-        layers = [f"L{index:02d}" for index in range(self._model_info.layer_count)]
-        return AnalysisResult(
+        return FlowAnalysisResult(
             model=self._model_info,
             tokens=tokens,
-            layers=layers,
-            families=list(FAMILIES),
-            frames=frames,
+            hidden_width=self._model_info.layer_width,
+            token_limit=self.max_visible_tokens,
+            token_limit_applied=token_limit_applied,
+            steps=steps,
         )
 
     def _ensure_loaded(self) -> None:
@@ -137,12 +111,14 @@ class Gemma3Adapter(ModelAdapter):
             add_special_tokens=True,
         )
 
-    def _content_positions(self, prompt: str, input_ids: torch.Tensor) -> list[int]:
+    def _content_positions(self, prompt: str, input_ids: torch.Tensor) -> tuple[list[int], bool]:
         prefix_ids = self._tokenizer("<start_of_turn>user\n", add_special_tokens=False)["input_ids"]
         prompt_ids = self._tokenizer(prompt, add_special_tokens=False)["input_ids"]
         start = 1 + len(prefix_ids)
-        end = min(start + len(prompt_ids), int(input_ids.shape[0]))
-        return list(range(start, end))
+        available = max(int(input_ids.shape[0]) - start - 5, 0)
+        visible_len = min(len(prompt_ids), available, self.max_visible_tokens)
+        end = start + visible_len
+        return list(range(start, end)), visible_len < len(prompt_ids)
 
     def _display_token(self, token_id: int) -> str:
         text = self._tokenizer.decode([token_id], skip_special_tokens=False)
@@ -167,6 +143,6 @@ class Gemma3Adapter(ModelAdapter):
             torch.cuda.empty_cache()
 
 
-def build_registry() -> dict[str, ModelAdapter]:
+def build_registry() -> dict[str, Gemma3Adapter]:
     adapter = Gemma3Adapter()
     return {adapter.model_id: adapter}
