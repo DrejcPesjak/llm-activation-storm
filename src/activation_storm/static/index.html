@@ -9,12 +9,10 @@
   <body>
     <main class="shell">
       <section class="hero">
-        <div>
-          <p class="eyebrow">Gemma Activation Observatory</p>
+        <div class="hero-main">
+          <p class="eyebrow">Gemma 3 4B IT</p>
           <h1>Activation Storm</h1>
-          <p class="lede">
-            Follow prompt information as it moves through attention, residual merges, and MLPs across the full network.
-          </p>
+          <p class="lede">Layer-by-layer prompt flow through attention, residual paths, and MLPs.</p>
         </div>
         <div class="hero-meta">
           <span id="status-pill" class="pill idle">Idle</span>
@@ -22,47 +20,48 @@
         </div>
       </section>
 
-      <section class="controls">
-        <label class="field compact-field">
-          <span>Model</span>
-          <select id="model-select"></select>
-        </label>
-        <label class="field prompt-field">
-          <span>Prompt</span>
-          <textarea id="prompt-input" rows="5">Write a cinematic description of a thunderstorm seen from orbit.</textarea>
-        </label>
-        <div class="actions">
-          <button id="analyze-button" type="button">Analyze Flow</button>
-          <button id="play-button" type="button" disabled>Play</button>
-        </div>
-      </section>
-
-      <section class="filters">
-        <div class="field">
-          <span>Show Stages</span>
-          <div class="toggle-group">
-            <label class="toggle-pill"><input id="toggle-attn" type="checkbox" checked /> <span>Attn</span></label>
-            <label class="toggle-pill"><input id="toggle-resid" type="checkbox" checked /> <span>Resid</span></label>
-            <label class="toggle-pill"><input id="toggle-mlp" type="checkbox" checked /> <span>MLP</span></label>
+      <section class="workspace-bar">
+        <div class="controls">
+          <label class="field compact-field">
+            <span>Model</span>
+            <select id="model-select"></select>
+          </label>
+          <label class="field prompt-field">
+            <span>Prompt</span>
+            <textarea id="prompt-input" rows="4">Write a cinematic description of a thunderstorm seen from orbit.</textarea>
+          </label>
+          <div class="actions">
+            <button id="analyze-button" type="button">Analyze Flow</button>
+            <button id="play-button" class="button-secondary" type="button" disabled>Play</button>
           </div>
         </div>
-        <div class="field">
-          <span>Token Axis</span>
-          <label class="toggle-pill single-toggle"><input id="toggle-special" type="checkbox" /> <span>Include special tokens</span></label>
-        </div>
-      </section>
 
-      <section class="timeline">
-        <div class="timeline-header">
-          <span id="step-label">Step: —</span>
-          <span id="step-counter">0 / 0</span>
+        <div class="filters">
+          <div class="field">
+            <span>Show Stages</span>
+            <div class="toggle-group segmented-control">
+              <label class="toggle-pill"><input id="toggle-attn" type="checkbox" checked /> <span>Attn</span></label>
+              <label class="toggle-pill"><input id="toggle-resid" type="checkbox" checked /> <span>Resid</span></label>
+              <label class="toggle-pill"><input id="toggle-mlp" type="checkbox" checked /> <span>MLP</span></label>
+            </div>
+          </div>
+          <div class="field">
+            <span>Token Axis</span>
+            <label class="toggle-pill single-toggle"><input id="toggle-special" type="checkbox" /> <span>Include special tokens</span></label>
+          </div>
         </div>
-        <input id="step-slider" type="range" min="0" max="0" value="0" disabled />
-        <div id="token-strip" class="token-strip"></div>
-        <p id="analysis-note" class="analysis-note"></p>
       </section>
 
       <section class="visualization-card">
+        <div class="timeline">
+          <div class="timeline-header">
+            <span id="step-label">Step: —</span>
+            <span id="step-counter">0 / 0</span>
+          </div>
+          <input id="step-slider" type="range" min="0" max="0" value="0" disabled />
+          <div id="token-strip" class="token-strip"></div>
+          <p id="analysis-note" class="analysis-note"></p>
+        </div>
         <canvas id="storm-canvas"></canvas>
         <div class="legend">
           <span><i class="legend-dot positive"></i> Cyan means positive activation.</span>
