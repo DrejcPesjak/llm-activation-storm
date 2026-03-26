@@ -29,6 +29,14 @@ const elements = {
 const POSITIVE = [94, 234, 212];
 const NEGATIVE = [249, 168, 212];
 const ACTIVE = "#fef08a";
+const OVERVIEW_HEIGHT = 208;
+const TOKEN_ROW_HEIGHT = 24;
+const DETAIL_TOP_GAP = 72;
+const CANVAS_TOP_PADDING = 28;
+const CANVAS_BOTTOM_PADDING = 54;
+const DETAIL_META_SPACE = 34;
+const DETAIL_LEFT_GUTTER = 152;
+
 const STAGE_FAMILY = {
   attn_out: "attn",
   resid_after_attn: "resid",
@@ -147,7 +155,18 @@ function createTexture(step) {
   return { ...step, canvas, hotspots };
 }
 
+function desiredCanvasHeight() {
+  if (!state.payload) {
+    return 760;
+  }
+
+  const tokenCount = Math.max(state.payload.tokens.length, 1);
+  return CANVAS_TOP_PADDING + OVERVIEW_HEIGHT + DETAIL_TOP_GAP + (tokenCount * TOKEN_ROW_HEIGHT) + DETAIL_META_SPACE + CANVAS_BOTTOM_PADDING;
+}
+
 function resizeCanvas() {
+  elements.canvas.style.height = `${desiredCanvasHeight()}px`;
+
   const ratio = window.devicePixelRatio || 1;
   const rect = elements.canvas.getBoundingClientRect();
   elements.canvas.width = Math.floor(rect.width * ratio);
@@ -362,12 +381,12 @@ function drawDetail(context, detail) {
   context.fillText(`${step.rows} tokens × ${step.cols} hidden dims`, detail.x, detail.y + detail.height + 18);
 
   const tokenLabelCount = state.payload.tokens.length;
-  const fontSize = Math.max(9, Math.min(13, 15 - tokenLabelCount * 0.18));
+  const fontSize = 12;
   context.font = `${fontSize}px IBM Plex Sans`;
   for (let index = 0; index < tokenLabelCount; index += 1) {
-    const y = detail.y + ((index + 0.5) / tokenLabelCount) * detail.height;
-    context.fillStyle = "rgba(212, 233, 255, 0.64)";
-    context.fillText(state.payload.tokens[index], detail.x - 108, y + fontSize * 0.32);
+    const y = detail.y + ((index + 0.5) * TOKEN_ROW_HEIGHT);
+    context.fillStyle = "rgba(212, 233, 255, 0.72)";
+    context.fillText(state.payload.tokens[index], detail.x - 116, y + 4);
   }
   context.restore();
 }
@@ -388,19 +407,18 @@ function render() {
   }
 
   const tokenCount = state.payload.tokens.length;
-  const detailHeight = Math.min(height * 0.58, Math.max(height * 0.4, tokenCount * 22));
-  const detailTop = height - detailHeight - 54;
+  const detailHeight = Math.max(tokenCount, 1) * TOKEN_ROW_HEIGHT;
   const overview = {
     x: 24,
-    y: 28,
+    y: CANVAS_TOP_PADDING,
     width: width - 48,
-    height: Math.max(180, detailTop - 58),
+    height: OVERVIEW_HEIGHT,
     unitWidth: 0,
   };
   const detail = {
-    x: 136,
-    y: detailTop,
-    width: width - 172,
+    x: DETAIL_LEFT_GUTTER,
+    y: overview.y + overview.height + DETAIL_TOP_GAP,
+    width: width - DETAIL_LEFT_GUTTER - 28,
     height: detailHeight,
   };
 
@@ -443,9 +461,8 @@ async function analyzePrompt() {
     state.payload = payload;
     state.allTextures = payload.steps.map(createTexture);
     renderTokenStrip();
-    elements.analysisNote.textContent = payload.token_limit_applied
-      ? `Showing the first ${payload.tokens.length} visible tokens${elements.toggleSpecial.checked ? " including special tokens" : ""}.`
-      : `${payload.tokens.length} visible tokens across ${payload.steps.length} stage steps${elements.toggleSpecial.checked ? ", including special tokens" : ""}.`;
+    elements.analysisNote.textContent = `${payload.tokens.length} visible tokens across ${payload.steps.length} stage steps${elements.toggleSpecial.checked ? ", including special tokens" : ""}.`;
+    resizeCanvas();
     updateVisibleSteps();
     setStatus("Ready", "ready");
   } catch (error) {

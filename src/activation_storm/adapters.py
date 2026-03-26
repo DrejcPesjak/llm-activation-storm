@@ -13,7 +13,6 @@ from .types import FlowAnalysisResult, FlowStep, ModelInfo
 class Gemma3Adapter:
     model_id = "google/gemma-3-4b-it"
     label = "Gemma 3 4B IT"
-    max_visible_tokens = 24
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -76,7 +75,7 @@ class Gemma3Adapter:
             model=self._model_info,
             tokens=tokens,
             hidden_width=self._model_info.layer_width,
-            token_limit=self.max_visible_tokens,
+            token_limit=len(tokens),
             token_limit_applied=token_limit_applied,
             steps=steps,
         )
@@ -133,8 +132,8 @@ class Gemma3Adapter:
             end = start + min(len(prompt_ids), available)
             visible_positions = list(range(start, end))
 
-        token_limit_applied = len(visible_positions) > self.max_visible_tokens
-        return visible_positions[: self.max_visible_tokens], token_limit_applied
+        token_limit_applied = False
+        return visible_positions, token_limit_applied
 
     def _display_token(self, token_id: int) -> str:
         text = self._tokenizer.decode([token_id], skip_special_tokens=False)

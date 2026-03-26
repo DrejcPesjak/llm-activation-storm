@@ -25,7 +25,7 @@ class FakeAdapter:
             model=self.model_info(),
             tokens=['hello'],
             hidden_width=4,
-            token_limit=24,
+            token_limit=1,
             token_limit_applied=False,
             steps=[
                 FlowStep(

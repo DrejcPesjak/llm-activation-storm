@@ -41,7 +41,7 @@ body::before {
 }
 
 .shell {
-  width: min(1460px, calc(100vw - 32px));
+  width: min(1920px, calc(100vw - 40px));
   margin: 0 auto;
   padding: 18px 0 24px;
 }
@@ -362,7 +362,6 @@ button[disabled] {
 
 #storm-canvas {
   width: 100%;
-  height: min(78vh, 920px);
   display: block;
   border-radius: 10px;
   background: linear-gradient(180deg, rgba(8, 12, 18, 0.995), rgba(5, 8, 13, 1));
