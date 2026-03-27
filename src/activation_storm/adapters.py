@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import gc
 import threading
+from pathlib import Path
 
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 from .capture import STAGE_SPECS, build_flow_steps, build_stage_hooks
+from .debug_export import export_layer_zero_debug
 from .types import FlowAnalysisResult, FlowStep, ModelInfo
 
 
@@ -37,33 +39,10 @@ class Gemma3Adapter:
             raise ValueError("Prompt must not be empty.")
 
         with self._lock:
-            self._ensure_loaded()
-
-            tokenized = self._tokenize_prompt(clean_prompt)
-            input_ids = tokenized["input_ids"]
-            attention_mask = tokenized["attention_mask"]
-            positions, token_limit_applied = self._visible_positions(
-                prompt=clean_prompt,
-                input_ids=input_ids[0],
-                attention_mask=attention_mask[0],
+            tokens, positions_tensor, sink, token_limit_applied = self._capture_prompt_locked(
+                clean_prompt=clean_prompt,
                 include_special_tokens=include_special_tokens,
             )
-            if not positions:
-                raise ValueError("Prompt did not produce any visible tokens.")
-
-            visible_ids = input_ids[0, positions].detach().cpu().tolist()
-            tokens = [self._display_token(token_id) for token_id in visible_ids]
-            positions_tensor = torch.tensor(positions, dtype=torch.long)
-            sink: dict[int, dict[str, torch.Tensor]] = {}
-
-            handles = build_stage_hooks(self._layers(), sink)
-            try:
-                with torch.inference_mode():
-                    self._model(input_ids=input_ids, attention_mask=attention_mask)
-            finally:
-                for handle in handles:
-                    handle.remove()
-
             steps = build_flow_steps(
                 sink=sink,
                 positions=positions_tensor,
@@ -79,6 +58,64 @@ class Gemma3Adapter:
             token_limit_applied=token_limit_applied,
             steps=steps,
         )
+
+    def export_extraction_check(
+        self,
+        prompt: str,
+        include_special_tokens: bool = False,
+        output_dir: Path | None = None,
+    ) -> dict:
+        clean_prompt = prompt.strip()
+        if not clean_prompt:
+            raise ValueError("Prompt must not be empty.")
+
+        target_dir = output_dir or Path("tmp") / "extraction_check"
+        with self._lock:
+            tokens, positions_tensor, sink, _token_limit_applied = self._capture_prompt_locked(
+                clean_prompt=clean_prompt,
+                include_special_tokens=include_special_tokens,
+            )
+            return export_layer_zero_debug(
+                output_dir=target_dir,
+                sink=sink,
+                positions=positions_tensor,
+                tokens=tokens,
+            )
+
+    def _capture_prompt_locked(
+        self,
+        *,
+        clean_prompt: str,
+        include_special_tokens: bool,
+    ) -> tuple[list[str], torch.Tensor, dict[int, dict[str, torch.Tensor]], bool]:
+        self._ensure_loaded()
+
+        tokenized = self._tokenize_prompt(clean_prompt)
+        input_ids = tokenized["input_ids"]
+        attention_mask = tokenized["attention_mask"]
+        positions, token_limit_applied = self._visible_positions(
+            prompt=clean_prompt,
+            input_ids=input_ids[0],
+            attention_mask=attention_mask[0],
+            include_special_tokens=include_special_tokens,
+        )
+        if not positions:
+            raise ValueError("Prompt did not produce any visible tokens.")
+
+        visible_ids = input_ids[0, positions].detach().cpu().tolist()
+        tokens = [self._display_token(token_id) for token_id in visible_ids]
+        positions_tensor = torch.tensor(positions, dtype=torch.long)
+        sink: dict[int, dict[str, torch.Tensor]] = {}
+
+        handles = build_stage_hooks(self._layers(), sink)
+        try:
+            with torch.inference_mode():
+                self._model(input_ids=input_ids, attention_mask=attention_mask)
+        finally:
+            for handle in handles:
+                handle.remove()
+
+        return tokens, positions_tensor, sink, token_limit_applied
 
     def _ensure_loaded(self) -> None:
         if self._model is not None:
