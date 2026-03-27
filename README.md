@@ -24,7 +24,7 @@ Setup:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install torch accelerate transformers
+pip install torch accelerate transformers transformer-lens
 ```
 
 Run:
