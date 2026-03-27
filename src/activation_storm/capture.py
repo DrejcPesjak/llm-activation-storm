@@ -6,12 +6,14 @@ from collections.abc import Callable
 import torch
 
 
-STAGE_SPECS = (
+EMBEDDING_STAGE_SPEC = ("embeddings", "EMB")
+LAYER_STAGE_SPECS = (
     ("attn_out", "ATTN"),
     ("resid_after_attn", "RESID"),
     ("mlp_out", "MLP"),
     ("resid_after_mlp", "RESID"),
 )
+STAGE_SPECS = (EMBEDDING_STAGE_SPEC, *LAYER_STAGE_SPECS)
 
 
 def unwrap_tensor(output):
@@ -24,7 +26,7 @@ def _detach_hidden(tensor: torch.Tensor) -> torch.Tensor:
     return tensor.detach().float().cpu()
 
 
-def build_stage_hooks(layers, sink: dict[int, dict[str, torch.Tensor]]):
+def build_stage_hooks(embed_tokens, layers, sink: dict[int, dict[str, torch.Tensor]]):
     handles = []
 
     def store_output(layer_index: int, stage_id: str):
@@ -40,6 +42,9 @@ def build_stage_hooks(layers, sink: dict[int, dict[str, torch.Tensor]]):
             return None
 
         return hook
+
+    sink[-1] = {}
+    handles.append(embed_tokens.register_forward_hook(store_output(-1, "embeddings")))
 
     for layer_index, layer in enumerate(layers):
         sink[layer_index] = {}
@@ -84,9 +89,29 @@ def build_flow_steps(
     steps = []
     step_index = 0
 
-    for layer_index in sorted(sink):
+    if -1 in sink:
+        embedding_field = sink[-1].get("embeddings")
+        if embedding_field is None:
+            raise RuntimeError("Missing stage 'embeddings' for embedding layer")
+        field = select_content_rows(embedding_field, positions)
+        scale = signed_scale(field)
+        steps.append(
+            step_factory(
+                step_index=step_index,
+                layer_index=-1,
+                stage_id="embeddings",
+                stage_label="EMB",
+                rows=int(field.shape[0]),
+                cols=hidden_width,
+                scale=round(scale, 6),
+                encoded_field=encode_signed_field(field, scale),
+            )
+        )
+        step_index += 1
+
+    for layer_index in sorted(index for index in sink if index >= 0):
         layer_data = sink[layer_index]
-        for stage_id, stage_label in STAGE_SPECS:
+        for stage_id, stage_label in LAYER_STAGE_SPECS:
             if stage_id not in layer_data:
                 raise RuntimeError(f"Missing stage '{stage_id}' for layer {layer_index}")
             field = select_content_rows(layer_data[stage_id], positions)

@@ -15,7 +15,7 @@ class FakeAdapter:
             label='Fake',
             layer_count=2,
             layer_width=4,
-            stage_sequence=['attn_out', 'resid_after_attn', 'mlp_out', 'resid_after_mlp'],
+            stage_sequence=['embeddings', 'attn_out', 'resid_after_attn', 'mlp_out', 'resid_after_mlp'],
         )
 
     def analyze_prompt(self, prompt: str, include_special_tokens: bool = False) -> FlowAnalysisResult:
@@ -30,6 +30,16 @@ class FakeAdapter:
             steps=[
                 FlowStep(
                     step_index=0,
+                    layer_index=-1,
+                    stage_id='embeddings',
+                    stage_label='EMB',
+                    rows=1,
+                    cols=4,
+                    scale=1.0,
+                    encoded_field='AAAA',
+                ),
+                FlowStep(
+                    step_index=1,
                     layer_index=0,
                     stage_id='attn_out',
                     stage_label='ATTN',
@@ -56,7 +66,7 @@ class ApiTests(unittest.TestCase):
     def test_models_payload(self):
         payload = self.app.models_payload()
         self.assertEqual(payload['default_model'], 'fake')
-        self.assertEqual(payload['models'][0]['stage_sequence'][0], 'attn_out')
+        self.assertEqual(payload['models'][0]['stage_sequence'][0], 'embeddings')
 
     def test_analyze_validates_model(self):
         with self.assertRaises(ValueError):
@@ -65,7 +75,8 @@ class ApiTests(unittest.TestCase):
     def test_analyze_returns_serializable_payload(self):
         payload = self.app.analyze({'model_id': 'fake', 'prompt': 'hello'})
         self.assertEqual(payload['tokens'], ['hello'])
-        self.assertEqual(payload['steps'][0]['stage_id'], 'attn_out')
+        self.assertEqual(payload['steps'][0]['stage_id'], 'embeddings')
+        self.assertEqual(payload['steps'][1]['stage_id'], 'attn_out')
         self.assertEqual(payload['steps'][0]['rows'], 1)
 
 

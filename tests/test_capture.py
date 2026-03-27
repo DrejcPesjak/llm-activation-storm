@@ -32,8 +32,11 @@ class CaptureTests(unittest.TestCase):
         decoded = list(base64.b64decode(encoded))
         self.assertEqual(decoded, [0, 128, 255])
 
-    def test_build_flow_steps_orders_stage_sequence(self):
+    def test_build_flow_steps_orders_embedding_then_layer_sequence(self):
         sink = {
+            -1: {
+                'embeddings': torch.ones(1, 2, 4) * 0.5,
+            },
             0: {
                 'attn_out': torch.ones(1, 2, 4),
                 'resid_after_attn': torch.ones(1, 2, 4) * 2,
@@ -44,8 +47,10 @@ class CaptureTests(unittest.TestCase):
         positions = torch.tensor([0, 1], dtype=torch.long)
         steps = build_flow_steps(sink, positions, hidden_width=4, step_factory=FlowStep)
         self.assertEqual([step.stage_id for step in steps], [
-            'attn_out', 'resid_after_attn', 'mlp_out', 'resid_after_mlp'
+            'embeddings', 'attn_out', 'resid_after_attn', 'mlp_out', 'resid_after_mlp'
         ])
+        self.assertEqual(steps[0].layer_index, -1)
+        self.assertEqual(steps[1].layer_index, 0)
         self.assertEqual(steps[0].rows, 2)
         self.assertEqual(steps[0].cols, 4)
 

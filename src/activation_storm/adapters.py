@@ -56,7 +56,7 @@ class Gemma3Adapter:
             positions_tensor = torch.tensor(positions, dtype=torch.long)
             sink: dict[int, dict[str, torch.Tensor]] = {}
 
-            handles = build_stage_hooks(self._layers(), sink)
+            handles = build_stage_hooks(self._embedding_module(), self._layers(), sink)
             try:
                 with torch.inference_mode():
                     self._model(input_ids=input_ids, attention_mask=attention_mask)
@@ -103,6 +103,15 @@ class Gemma3Adapter:
             return self._model.model.language_model.layers
         raise RuntimeError("Could not locate model layers for activation hooks.")
 
+    def _embedding_module(self):
+        if hasattr(self._model, "model") and hasattr(self._model.model, "embed_tokens"):
+            return self._model.model.embed_tokens
+        if hasattr(self._model, "model") and hasattr(self._model.model, "language_model"):
+            language_model = self._model.model.language_model
+            if hasattr(language_model, "embed_tokens"):
+                return language_model.embed_tokens
+        raise RuntimeError("Could not locate token embedding module for activation hooks.")
+
     def _format_chat(self, prompt: str) -> str:
         return f"<start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n"
 
@@ -139,7 +148,6 @@ class Gemma3Adapter:
         text = self._tokenizer.decode([token_id], skip_special_tokens=False)
         text = text.replace("\n", "\\n")
         return text if text else " "
-
 
     def _strip_vision_modules(self) -> None:
         model = self._model

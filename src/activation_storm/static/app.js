@@ -20,6 +20,7 @@ const elements = {
   statusPill: document.getElementById("status-pill"),
   modelMeta: document.getElementById("model-meta"),
   canvas: document.getElementById("storm-canvas"),
+  toggleEmb: document.getElementById("toggle-emb"),
   toggleAttn: document.getElementById("toggle-attn"),
   toggleResid: document.getElementById("toggle-resid"),
   toggleMlp: document.getElementById("toggle-mlp"),
@@ -36,8 +37,13 @@ const CANVAS_TOP_PADDING = 28;
 const CANVAS_BOTTOM_PADDING = 54;
 const DETAIL_META_SPACE = 34;
 const DETAIL_LEFT_GUTTER = 152;
+const PANEL_GAP = 2;
+const GROUP_GAP = 7;
+const EMBEDDING_GROUP_GAP = 12;
+const EMBEDDING_LABEL_OFFSET = 18;
 
 const STAGE_FAMILY = {
+  embeddings: "emb",
   attn_out: "attn",
   resid_after_attn: "resid",
   mlp_out: "mlp",
@@ -48,7 +54,7 @@ async function fetchJson(url, options = {}) {
   let response;
   try {
     response = await fetch(url, options);
-  } catch (error) {
+  } catch (_error) {
     throw new Error(`Network request failed for ${url}. Check that the local server is still running.`);
   }
 
@@ -87,6 +93,7 @@ function stopPlayback() {
 
 function selectedFamilies() {
   return {
+    emb: elements.toggleEmb.checked,
     attn: elements.toggleAttn.checked,
     resid: elements.toggleResid.checked,
     mlp: elements.toggleMlp.checked,
@@ -102,6 +109,14 @@ function activeTexture() {
 
 function familyForStep(step) {
   return STAGE_FAMILY[step.stage_id] || "resid";
+}
+
+function layerDisplayIndex(step) {
+  return step.layer_index + 1;
+}
+
+function stepTitle(step) {
+  return `Layer ${layerDisplayIndex(step)} • ${step.stage_label}`;
 }
 
 function base64ToBytes(base64) {
@@ -224,7 +239,7 @@ function updateStepLabel() {
     elements.stepCounter.textContent = "0 / 0";
     return;
   }
-  elements.stepLabel.textContent = `Step: Layer ${step.layer_index + 1} • ${step.stage_label}`;
+  elements.stepLabel.textContent = `Step: ${stepTitle(step)}`;
   elements.stepCounter.textContent = `${state.visibleIndex + 1} / ${state.visibleTextures.length}`;
 }
 
@@ -273,30 +288,62 @@ function drawBackdrop(context, width, height) {
   context.fillRect(0, 0, width, height);
 }
 
-function panelX(index, overview) {
-  const stagesPerLayer = state.payload.model.stage_sequence.length;
-  const layerIndex = Math.floor(index / stagesPerLayer);
-  const gap = 2;
-  const layerGap = 7;
-  return overview.x + index * (overview.unitWidth + gap) + layerIndex * layerGap;
+function groupKey(step) {
+  return step.stage_id === "embeddings" ? "embeddings" : `layer-${step.layer_index}`;
+}
+
+function groupLabel(step) {
+  return step.stage_id === "embeddings" ? "EMB" : `L${String(layerDisplayIndex(step)).padStart(2, "0")}`;
+}
+
+function buildOverviewLayout(steps, overview) {
+  const groupKeys = steps.map(groupKey);
+  const groupStarts = [];
+  let groupBreakCount = 0;
+
+  steps.forEach((step, index) => {
+    if (index === 0 || groupKeys[index] !== groupKeys[index - 1]) {
+      groupStarts.push(index);
+      if (index > 0) {
+        groupBreakCount += 1;
+      }
+    }
+  });
+
+  const embeddingGapBonus = steps.some((step) => step.stage_id === "embeddings") ? (EMBEDDING_GROUP_GAP - GROUP_GAP) : 0;
+  const totalGap = (Math.max(steps.length - 1, 0) * PANEL_GAP) + (groupBreakCount * GROUP_GAP) + embeddingGapBonus + EMBEDDING_LABEL_OFFSET;
+  const unitWidth = Math.max((overview.width - totalGap) / Math.max(steps.length, 1), 3.5);
+  const positions = [];
+  let cursor = overview.x + EMBEDDING_LABEL_OFFSET;
+
+  steps.forEach((step, index) => {
+    if (index > 0) {
+      cursor += PANEL_GAP;
+      if (groupKeys[index] !== groupKeys[index - 1]) {
+        cursor += groupKeys[index - 1] === "embeddings" ? EMBEDDING_GROUP_GAP : GROUP_GAP;
+      }
+    }
+    positions.push(cursor);
+    cursor += unitWidth;
+  });
+
+  return { unitWidth, positions, groupStarts };
 }
 
 function drawOverview(context, overview) {
   const steps = state.allTextures;
   const active = activeTexture();
   const families = selectedFamilies();
-  const stagesPerLayer = state.payload.model.stage_sequence.length;
-  const totalGap = (steps.length - 1) * 2 + (state.payload.model.layer_count - 1) * 7;
-  overview.unitWidth = Math.max((overview.width - totalGap) / steps.length, 3.5);
+  const layout = buildOverviewLayout(steps, overview);
 
   context.save();
   context.strokeStyle = "rgba(155, 212, 255, 0.08)";
   context.strokeRect(overview.x, overview.y, overview.width, overview.height);
 
   steps.forEach((step, index) => {
-    const x = panelX(index, overview);
+    const x = layout.positions[index];
     const y = overview.y + 24;
-    const width = overview.unitWidth;
+    const width = layout.unitWidth;
     const height = overview.height - 36;
     const enabled = families[familyForStep(step)];
 
@@ -304,23 +351,25 @@ function drawOverview(context, overview) {
     context.imageSmoothingEnabled = false;
     context.drawImage(step.canvas, x, y, width, height);
 
-    if ((index + 1) % stagesPerLayer === 0 && index < steps.length - 1) {
+    if (index < steps.length - 1 && groupKey(steps[index + 1]) !== groupKey(step)) {
       context.globalAlpha = 1;
       context.fillStyle = "rgba(149, 192, 255, 0.08)";
       context.fillRect(x + width + 3, y - 10, 1, height + 20);
     }
 
-    if (index % stagesPerLayer === 0) {
+    if (index === 0 || groupKey(steps[index - 1]) !== groupKey(step)) {
       context.globalAlpha = 1;
       context.fillStyle = "rgba(228, 243, 255, 0.52)";
       context.font = "11px IBM Plex Sans";
-      context.fillText(`L${String(step.layer_index + 1).padStart(2, "0")}`, x, overview.y + 14);
+      const labelX = step.stage_id === "embeddings" ? x - EMBEDDING_LABEL_OFFSET + 2 : x;
+      context.fillText(groupLabel(step), labelX, overview.y + 14);
     }
   });
 
   if (active) {
-    const activeX = panelX(active.step_index, overview);
-    const activeWidth = overview.unitWidth;
+    const activeIndex = steps.findIndex((step) => step.step_index === active.step_index);
+    const activeX = layout.positions[activeIndex];
+    const activeWidth = layout.unitWidth;
     context.globalAlpha = 1;
     context.shadowColor = ACTIVE;
     context.shadowBlur = 20;
@@ -375,7 +424,7 @@ function drawDetail(context, detail) {
 
   context.fillStyle = "rgba(228, 243, 255, 0.92)";
   context.font = "600 18px IBM Plex Sans";
-  context.fillText(`Layer ${step.layer_index + 1} • ${step.stage_label}`, detail.x, detail.y - 18);
+  context.fillText(stepTitle(step), detail.x, detail.y - 18);
   context.font = "12px IBM Plex Sans";
   context.fillStyle = "rgba(169, 207, 241, 0.72)";
   context.fillText(`${step.rows} tokens × ${step.cols} hidden dims`, detail.x, detail.y + detail.height + 18);
@@ -413,7 +462,6 @@ function render() {
     y: CANVAS_TOP_PADDING,
     width: width - 48,
     height: OVERVIEW_HEIGHT,
-    unitWidth: 0,
   };
   const detail = {
     x: DETAIL_LEFT_GUTTER,
@@ -484,7 +532,7 @@ elements.playButton.addEventListener("click", togglePlayback);
 elements.stepSlider.addEventListener("input", (event) => {
   setVisibleStep(Number(event.target.value));
 });
-[elements.toggleAttn, elements.toggleResid, elements.toggleMlp].forEach((toggle) => {
+[elements.toggleEmb, elements.toggleAttn, elements.toggleResid, elements.toggleMlp].forEach((toggle) => {
   toggle.addEventListener("change", () => {
     stopPlayback();
     updateVisibleSteps();
