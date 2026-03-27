@@ -31,6 +31,11 @@ class Gemma3Adapter:
     def model_info(self) -> ModelInfo:
         return self._model_info
 
+    def architecture_text(self) -> str:
+        with self._lock:
+            self._ensure_loaded()
+            return str(self._model)
+
     def analyze_prompt(self, prompt: str, include_special_tokens: bool = False) -> FlowAnalysisResult:
         clean_prompt = prompt.strip()
         if not clean_prompt:

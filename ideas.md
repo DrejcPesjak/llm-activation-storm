@@ -3,7 +3,7 @@
 - [ ] Fix zoom activation flickering
 - [ ] Move the layer slider and play/pause button to bottom of screen, always visible floating
 - [ ] Add panel for logit / most probable next token - top 10
-- [ ] Add button for full model architecture printout (click model, window popup, `print(model)`)
+- [x] Add button for full model architecture printout (click model, window popup, `print(model)`)
 - [x] Check if attn mlp resid correctly extracted (`debug/extraction-check`)
 - [x] Add layer 0 (embeddings)
 - [ ] Add per attn head vis

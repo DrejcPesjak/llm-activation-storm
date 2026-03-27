@@ -6,7 +6,7 @@ import traceback
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from .adapters import build_registry
 
@@ -34,6 +34,17 @@ class ActivationStormApp:
             include_special_tokens=include_special_tokens,
         ).to_dict()
 
+    def architecture_payload(self, model_id: str) -> dict:
+        if not model_id:
+            raise ValueError("model_id is required.")
+        if model_id not in self.registry:
+            raise ValueError(f"Unknown model_id: {model_id}")
+        adapter = self.registry[model_id]
+        return {
+            "model": adapter.model_info().to_dict(),
+            "architecture": adapter.architecture_text(),
+        }
+
 
 class ActivationStormHandler(BaseHTTPRequestHandler):
     server_version = "ActivationStorm/0.1"
@@ -43,12 +54,23 @@ class ActivationStormHandler(BaseHTTPRequestHandler):
         return self.server.app
 
     def do_GET(self) -> None:
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
         if path == "/api/health":
             self._send_json(HTTPStatus.OK, {"status": "ok"})
             return
         if path == "/api/models":
             self._send_json(HTTPStatus.OK, self.app.models_payload())
+            return
+        if path == "/api/architecture":
+            try:
+                model_id = parse_qs(parsed.query).get("model_id", [""])[0]
+                self._send_json(HTTPStatus.OK, self.app.architecture_payload(model_id))
+            except ValueError as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            except Exception as exc:  # pragma: no cover
+                traceback.print_exc()
+                self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
             return
         if path == "/favicon.ico":
             self.send_response(HTTPStatus.NO_CONTENT)

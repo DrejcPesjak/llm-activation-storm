@@ -9,6 +9,9 @@ from activation_storm.types import FlowAnalysisResult, FlowStep, ModelInfo
 
 
 class FakeAdapter:
+    def architecture_text(self) -> str:
+        return "FakeModel(\n  (layers): FakeStack()\n)"
+
     def model_info(self) -> ModelInfo:
         return ModelInfo(
             id='fake',
@@ -78,6 +81,15 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload['steps'][0]['stage_id'], 'embeddings')
         self.assertEqual(payload['steps'][1]['stage_id'], 'attn_out')
         self.assertEqual(payload['steps'][0]['rows'], 1)
+
+    def test_architecture_payload_returns_model_printout(self):
+        payload = self.app.architecture_payload('fake')
+        self.assertEqual(payload['model']['id'], 'fake')
+        self.assertIn('FakeModel', payload['architecture'])
+
+    def test_architecture_payload_validates_model(self):
+        with self.assertRaises(ValueError):
+            self.app.architecture_payload('missing')
 
 
 if __name__ == '__main__':

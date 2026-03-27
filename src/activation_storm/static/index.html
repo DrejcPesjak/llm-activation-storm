@@ -22,9 +22,10 @@
 
       <section class="workspace-bar">
         <div class="controls">
-          <label class="field compact-field">
+          <label class="field compact-field model-field">
             <span>Model</span>
             <select id="model-select"></select>
+            <button id="architecture-button" class="architecture-trigger" type="button">See architecture</button>
           </label>
           <label class="field prompt-field">
             <span>Prompt</span>
@@ -70,6 +71,20 @@
         </div>
       </section>
     </main>
+
+
+      <dialog id="architecture-dialog" class="architecture-dialog">
+        <div class="architecture-dialog-inner">
+          <div class="architecture-dialog-header">
+            <div>
+              <p class="architecture-kicker">Model Architecture</p>
+              <h2 id="architecture-title">Architecture</h2>
+            </div>
+            <button id="architecture-close" class="button-secondary architecture-close" type="button">Close</button>
+          </div>
+          <pre id="architecture-content" class="architecture-content">Loading…</pre>
+        </div>
+      </dialog>
 
     <script src="/app.js" defer></script>
   </body>

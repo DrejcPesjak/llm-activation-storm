@@ -12,6 +12,7 @@ const elements = {
   promptInput: document.getElementById("prompt-input"),
   analyzeButton: document.getElementById("analyze-button"),
   playButton: document.getElementById("play-button"),
+  architectureButton: document.getElementById("architecture-button"),
   stepSlider: document.getElementById("step-slider"),
   stepLabel: document.getElementById("step-label"),
   stepCounter: document.getElementById("step-counter"),
@@ -25,6 +26,10 @@ const elements = {
   toggleResid: document.getElementById("toggle-resid"),
   toggleMlp: document.getElementById("toggle-mlp"),
   toggleSpecial: document.getElementById("toggle-special"),
+  architectureDialog: document.getElementById("architecture-dialog"),
+  architectureTitle: document.getElementById("architecture-title"),
+  architectureContent: document.getElementById("architecture-content"),
+  architectureClose: document.getElementById("architecture-close"),
 };
 
 const POSITIVE = [94, 234, 212];
@@ -270,6 +275,44 @@ function togglePlayback() {
     const nextIndex = (state.visibleIndex + 1) % state.visibleTextures.length;
     setVisibleStep(nextIndex);
   }, 260);
+}
+
+
+async function showArchitecture() {
+  const modelId = elements.modelSelect.value;
+  if (!modelId) {
+    return;
+  }
+
+  elements.architectureButton.disabled = true;
+  elements.architectureTitle.textContent = "Loading architecture…";
+  elements.architectureContent.textContent = "Loading…";
+  if (typeof elements.architectureDialog.showModal === "function") {
+    if (!elements.architectureDialog.open) {
+      elements.architectureDialog.showModal();
+    }
+  } else {
+    elements.architectureDialog.setAttribute("open", "open");
+  }
+
+  try {
+    const payload = await fetchJson(`/api/architecture?model_id=${encodeURIComponent(modelId)}`);
+    elements.architectureTitle.textContent = payload.model.label;
+    elements.architectureContent.textContent = payload.architecture;
+  } catch (error) {
+    elements.architectureTitle.textContent = "Architecture";
+    elements.architectureContent.textContent = error.message;
+  } finally {
+    elements.architectureButton.disabled = false;
+  }
+}
+
+function closeArchitecture() {
+  if (typeof elements.architectureDialog.close === "function") {
+    elements.architectureDialog.close();
+  } else {
+    elements.architectureDialog.removeAttribute("open");
+  }
 }
 
 function drawBackdrop(context, width, height) {
@@ -529,6 +572,13 @@ async function analyzePrompt() {
 
 elements.analyzeButton.addEventListener("click", analyzePrompt);
 elements.playButton.addEventListener("click", togglePlayback);
+elements.architectureButton.addEventListener("click", showArchitecture);
+elements.architectureClose.addEventListener("click", closeArchitecture);
+elements.architectureDialog.addEventListener("click", (event) => {
+  if (event.target === elements.architectureDialog) {
+    closeArchitecture();
+  }
+});
 elements.stepSlider.addEventListener("input", (event) => {
   setVisibleStep(Number(event.target.value));
 });
