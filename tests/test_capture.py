@@ -6,12 +6,14 @@ import unittest
 import torch
 
 from activation_storm.capture import (
+    apply_logit_soft_cap,
     build_flow_steps,
     encode_signed_field,
     select_content_rows,
     signed_scale,
+    top_logit_tokens,
 )
-from activation_storm.types import FlowStep
+from activation_storm.types import FlowStep, LogitToken
 
 
 class CaptureTests(unittest.TestCase):
@@ -31,6 +33,23 @@ class CaptureTests(unittest.TestCase):
         encoded = encode_signed_field(values, scale=1.0)
         decoded = list(base64.b64decode(encoded))
         self.assertEqual(decoded, [0, 128, 255])
+
+    def test_apply_logit_soft_cap_leaves_logits_unchanged_when_disabled(self):
+        logits = torch.tensor([1.0, 2.0], dtype=torch.float32)
+        capped = apply_logit_soft_cap(logits, None)
+        self.assertTrue(torch.equal(capped, logits))
+
+    def test_top_logit_tokens_returns_sorted_top_k(self):
+        logits = torch.tensor([0.5, 3.2, 1.1, 2.4], dtype=torch.float32)
+        top_tokens = top_logit_tokens(
+            logits,
+            decode_token=lambda token_id: f"tok-{token_id}",
+            token_factory=LogitToken,
+            limit=3,
+        )
+        self.assertEqual([entry.token_id for entry in top_tokens], [1, 3, 2])
+        self.assertEqual(top_tokens[0].token, "tok-1")
+        self.assertEqual(top_tokens[1].logit, 2.4)
 
     def test_build_flow_steps_orders_embedding_then_layer_sequence(self):
         sink = {

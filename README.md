@@ -1,6 +1,6 @@
 # Activation Storm
 
-![Activation Storm screenshot](img/screenshot_2026-03-26.png)
+![Activation Storm screenshot](img/screenshot_2026-03-28.png)
 
 Activation Storm is a local browser app for visualizing activations from a prompt as they move through an LLM layer by layer.
 
@@ -9,6 +9,7 @@ You enter a prompt, run one forward pass, and inspect the flow across the networ
 The app now supports:
 - custom `google/gemma-3-4b-it` handling for the low-VRAM Gemma 3 path
 - a small TransformerLens-backed model set from the dropdown, including GPT-2, Pythia, Llama, Mistral, Qwen, Gemma 2, and Gemma 3 1B variants
+    - can expand to all **237 models** in the `transformer-lens` zoo (add string identifiers to `TL_MODEL_SPECS` in `src/activation_storm/adapters.py`)
 
 For each layer, the app captures:
 - `attn_out`

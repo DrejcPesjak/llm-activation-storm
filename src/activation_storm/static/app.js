@@ -20,6 +20,8 @@ const elements = {
   stepCounter: document.getElementById("step-counter"),
   tokenStrip: document.getElementById("token-strip"),
   analysisNote: document.getElementById("analysis-note"),
+  logitsMeta: document.getElementById("logits-meta"),
+  logitsList: document.getElementById("logits-list"),
   statusPill: document.getElementById("status-pill"),
   modelMeta: document.getElementById("model-meta"),
   canvas: document.getElementById("storm-canvas"),
@@ -212,6 +214,65 @@ function renderTokenStrip() {
   });
 }
 
+function layerTopTokensMap() {
+  if (!state.payload?.layer_top_tokens) {
+    return new Map();
+  }
+  return new Map(state.payload.layer_top_tokens.map((entry) => [entry.layer_index, entry.top_tokens]));
+}
+
+function renderLogitList(container, topTokens, emptyText) {
+  container.innerHTML = "";
+  if (!topTokens?.length) {
+    const empty = document.createElement("div");
+    empty.className = "logit-empty";
+    empty.textContent = emptyText;
+    container.appendChild(empty);
+    return;
+  }
+
+  topTokens.forEach((entry) => {
+    const row = document.createElement("div");
+    row.className = "logit-row";
+
+    const token = document.createElement("span");
+    token.className = "logit-token";
+    token.textContent = entry.token === " " ? "␠" : entry.token;
+
+    const value = document.createElement("span");
+    value.className = "logit-value";
+    value.textContent = entry.logit.toFixed(2);
+
+    row.appendChild(token);
+    row.appendChild(value);
+    container.appendChild(row);
+  });
+}
+
+function renderLogitPanels() {
+  if (!state.payload) {
+    elements.logitsMeta.textContent = "Awaiting analysis";
+    renderLogitList(elements.logitsList, [], "Run a prompt to inspect layer LogitLens results.");
+    return;
+  }
+
+  const active = activeTexture();
+  if (!active) {
+    elements.logitsMeta.textContent = "Select a step";
+    renderLogitList(elements.logitsList, [], "No LogitLens data available.");
+    return;
+  }
+
+  const layerIndex = Math.max(active.layer_index, 0);
+  const topTokens = layerTopTokensMap().get(layerIndex) || [];
+  const targetToken = state.payload.target_token === " " ? "␠" : state.payload.target_token;
+  const isFinalLayer = state.payload.model && layerIndex === (state.payload.model.layer_count - 1);
+  elements.logitsMeta.textContent = isFinalLayer
+    ? `Final logits after ${targetToken}`
+    : `Layer ${layerIndex + 1} logits after ${targetToken}`;
+  renderLogitList(elements.logitsList, topTokens, "No LogitLens data for the current layer.");
+}
+
 function updateVisibleSteps(preferredStepIndex = null) {
   const families = selectedFamilies();
   const active = activeTexture();
@@ -225,6 +286,7 @@ function updateVisibleSteps(preferredStepIndex = null) {
     elements.playButton.disabled = true;
     elements.stepLabel.textContent = "Step: Select at least one stage family";
     elements.stepCounter.textContent = "0 / 0";
+    renderLogitPanels();
     render();
     return;
   }
@@ -236,6 +298,7 @@ function updateVisibleSteps(preferredStepIndex = null) {
   elements.stepSlider.max = String(Math.max(state.visibleTextures.length - 1, 0));
   elements.stepSlider.value = String(state.visibleIndex);
   updateStepLabel();
+  renderLogitPanels();
   render();
 }
 
@@ -286,6 +349,7 @@ function setVisibleStep(index) {
   state.visibleIndex = Math.max(0, Math.min(index, state.visibleTextures.length - 1));
   elements.stepSlider.value = String(state.visibleIndex);
   updateStepLabel();
+  renderLogitPanels();
   render();
 }
 
@@ -580,6 +644,7 @@ async function analyzePrompt() {
     state.payload = payload;
     state.allTextures = payload.steps.map(createTexture);
     renderTokenStrip();
+    renderLogitPanels();
     elements.analysisNote.textContent = `${payload.tokens.length} visible tokens across ${payload.steps.length} stage steps${elements.toggleSpecial.checked ? ", including special tokens" : ""}.`;
     resizeCanvas();
     updateVisibleSteps();
@@ -592,6 +657,7 @@ async function analyzePrompt() {
     state.payload = null;
     state.allTextures = [];
     state.visibleTextures = [];
+    renderLogitPanels();
     render();
   } finally {
     elements.analyzeButton.disabled = false;
@@ -634,10 +700,12 @@ elements.modelSelect.addEventListener("change", () => {
 loadModels()
   .then(() => {
     setStatus("Idle", "idle");
+    renderLogitPanels();
     resizeCanvas();
   })
   .catch((error) => {
     setStatus("Error", "busy");
     elements.modelMeta.textContent = error.message;
+    renderLogitPanels();
     resizeCanvas();
   });

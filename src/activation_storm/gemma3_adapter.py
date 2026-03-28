@@ -7,8 +7,8 @@ import torch
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 from .adapters import DEFAULT_PROMPTS, ModelAdapter, ModelResidencyManager
-from .capture import STAGE_SPECS, build_flow_steps, build_stage_hooks
-from .types import FlowAnalysisResult, FlowStep, ModelInfo
+from .capture import STAGE_SPECS, build_flow_steps, build_stage_hooks, top_logit_tokens
+from .types import FlowAnalysisResult, FlowStep, LayerTopTokens, LogitToken, ModelInfo
 
 
 TL_STAGE_SEQUENCE = [stage_id for stage_id, _stage_label in STAGE_SPECS]
@@ -86,6 +86,9 @@ class Gemma3Adapter(ModelAdapter):
                 hidden_width=self._model_info.layer_width,
                 step_factory=FlowStep,
             )
+            target_position = int(attention_mask[0].sum().item()) - 1
+            target_token_id = int(input_ids[0, target_position].item())
+            layer_top_tokens = self._build_layer_top_tokens(sink=sink, target_position=target_position)
 
         return FlowAnalysisResult(
             model=self._model_info,
@@ -94,6 +97,10 @@ class Gemma3Adapter(ModelAdapter):
             token_limit=len(tokens),
             token_limit_applied=token_limit_applied,
             steps=steps,
+            target_position=target_position,
+            target_token_id=target_token_id,
+            target_token=self._display_token(target_token_id),
+            layer_top_tokens=layer_top_tokens,
         )
 
     def release(self) -> None:
@@ -175,6 +182,45 @@ class Gemma3Adapter(ModelAdapter):
         text = self._tokenizer.decode([token_id], skip_special_tokens=False)
         text = text.replace("\n", "\\n")
         return text if text else " "
+
+    def _build_layer_top_tokens(self, sink: dict[int, dict[str, torch.Tensor]], target_position: int) -> list[LayerTopTokens]:
+        layer_top_tokens: list[LayerTopTokens] = []
+        for layer_index in sorted(index for index in sink if index >= 0):
+            layer_data = sink[layer_index]
+            resid = layer_data.get("resid_after_mlp")
+            if resid is None:
+                raise RuntimeError(f"Missing stage 'resid_after_mlp' for layer {layer_index}")
+            layer_top_tokens.append(
+                LayerTopTokens(
+                    layer_index=layer_index,
+                    top_tokens=self._top_tokens_from_hidden(resid[0, target_position, :]),
+                )
+            )
+
+        return layer_top_tokens
+
+    def _top_tokens_from_hidden(self, hidden: torch.Tensor) -> list[LogitToken]:
+        lm_head = self._lm_head()
+        residual = hidden.unsqueeze(0).unsqueeze(0).to(device=lm_head.weight.device, dtype=lm_head.weight.dtype)
+        logits = lm_head(self._final_norm_module()(residual))[0, 0, :]
+        return self._top_tokens_from_logits(logits)
+
+    def _top_tokens_from_logits(self, logits: torch.Tensor) -> list[LogitToken]:
+        return top_logit_tokens(logits, self._display_token, LogitToken)
+
+    def _final_norm_module(self):
+        if hasattr(self._model, "model") and hasattr(self._model.model, "norm"):
+            return self._model.model.norm
+        if hasattr(self._model, "model") and hasattr(self._model.model, "language_model"):
+            language_model = self._model.model.language_model
+            if hasattr(language_model, "norm"):
+                return language_model.norm
+        raise RuntimeError("Could not locate final norm module for logits projection.")
+
+    def _lm_head(self):
+        if hasattr(self._model, "lm_head"):
+            return self._model.lm_head
+        raise RuntimeError("Could not locate lm_head for logits projection.")
 
     def _strip_vision_modules(self) -> None:
         model = self._model

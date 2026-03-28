@@ -80,6 +80,38 @@ def encode_signed_field(values: torch.Tensor, scale: float) -> str:
     return base64.b64encode(quantized.numpy().tobytes()).decode("ascii")
 
 
+def apply_logit_soft_cap(logits: torch.Tensor, soft_cap: float | None) -> torch.Tensor:
+    if soft_cap is None or soft_cap <= 0.0:
+        return logits
+    capped = logits / soft_cap
+    capped = torch.tanh(capped)
+    return capped * soft_cap
+
+
+def top_logit_tokens(
+    logits: torch.Tensor,
+    decode_token: Callable[[int], str],
+    token_factory: Callable[..., object],
+    limit: int = 10,
+) -> list[object]:
+    if logits.ndim != 1:
+        raise ValueError(f"Expected [vocab] logits tensor, got shape {tuple(logits.shape)}")
+
+    top_k = min(limit, int(logits.shape[0]))
+    if top_k <= 0:
+        return []
+
+    values, indices = torch.topk(logits.float(), k=top_k)
+    return [
+        token_factory(
+            token_id=int(token_id),
+            token=decode_token(int(token_id)),
+            logit=round(float(logit), 6),
+        )
+        for logit, token_id in zip(values.detach().cpu().tolist(), indices.detach().cpu().tolist())
+    ]
+
+
 def build_flow_steps(
     sink: dict[int, dict[str, torch.Tensor]],
     positions: torch.Tensor,

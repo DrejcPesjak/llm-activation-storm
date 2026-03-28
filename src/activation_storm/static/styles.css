@@ -45,9 +45,14 @@ body::before {
 }
 
 .shell {
-  width: min(1920px, calc(100vw - 40px));
+  width: min(2100px, calc(100vw - 40px));
   margin: 0 auto;
   padding: 18px 0 48px;
+}
+
+.main-column {
+  width: min(1920px, 100%);
+  margin: 0 auto;
 }
 
 .hero,
@@ -371,6 +376,13 @@ button[disabled] {
   box-shadow: none;
 }
 
+.visualization-wrap {
+  position: relative;
+  width: min(1920px, 100%);
+  margin: 0 auto;
+  padding-right: 0;
+}
+
 .timeline {
   padding: 0 2px 12px;
   margin-bottom: 6px;
@@ -448,6 +460,74 @@ button[disabled] {
   font-size: 0.82rem;
 }
 
+.logit-panels {
+  position: absolute;
+  top: 0;
+  left: calc(100% + 16px);
+  width: 250px;
+}
+
+.logit-panel {
+  padding: 12px 12px 12px;
+  border: 1px solid rgba(174, 193, 214, 0.06);
+  border-radius: 10px;
+  background: rgba(8, 12, 18, 0.62);
+}
+
+.logit-panel-header {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
+.logit-panel-meta {
+  color: var(--muted-soft);
+}
+
+.logit-list {
+  display: grid;
+  /* gap: 6px; */
+  min-height: 232px;
+}
+
+.logit-row,
+.logit-empty {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 7ch;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.logit-row:last-child,
+.logit-empty:last-child {
+  border-bottom: 0;
+}
+
+.logit-token {
+  min-width: 0;
+  color: rgba(237, 243, 250, 0.9);
+  font: 0.74rem "IBM Plex Mono", "SFMono-Regular", monospace;
+  word-break: break-word;
+}
+
+.logit-value {
+  color: var(--positive);
+  font: 0.74rem "IBM Plex Mono", "SFMono-Regular", monospace;
+  white-space: nowrap;
+  width: 9ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.logit-empty {
+  color: var(--muted-soft);
+  grid-template-columns: 1fr;
+}
+
 #storm-canvas {
   width: 100%;
   display: block;
@@ -493,5 +573,11 @@ button[disabled] {
   .hero-meta {
     align-items: flex-start;
     min-width: 0;
+  }
+
+  .logit-panels {
+    position: static;
+    width: auto;
+    margin-top: 12px;
   }
 }

@@ -8,8 +8,8 @@ from transformer_lens import HookedTransformer
 from transformer_lens.loading_from_pretrained import get_official_model_name
 
 from .adapters import DEFAULT_PROMPTS, ModelAdapter, ModelResidencyManager, TLModelSpec
-from .capture import STAGE_SPECS, encode_signed_field, signed_scale
-from .types import FlowAnalysisResult, FlowStep, ModelInfo
+from .capture import STAGE_SPECS, apply_logit_soft_cap, encode_signed_field, signed_scale, top_logit_tokens
+from .types import FlowAnalysisResult, FlowStep, LayerTopTokens, LogitToken, ModelInfo
 
 
 TL_STAGE_SEQUENCE = [stage_id for stage_id, _stage_label in STAGE_SPECS]
@@ -81,7 +81,7 @@ class TransformerLensAdapter(ModelAdapter):
 
             cache_names = self._cache_names()
             with torch.inference_mode():
-                _, cache = self._model.run_with_cache(
+                _logits, cache = self._model.run_with_cache(
                     tokens,
                     names_filter=cache_names,
                     return_cache_object=False,
@@ -90,6 +90,9 @@ class TransformerLensAdapter(ModelAdapter):
             visible_ids = [token_ids[index] for index in positions]
             visible_tokens = [self._display_token(token_id) for token_id in visible_ids]
             steps = self._build_steps_from_cache(cache=cache, positions=positions)
+            target_position = len(token_ids) - 1
+            target_token_id = token_ids[target_position]
+            layer_top_tokens = self._build_layer_top_tokens(cache=cache, target_position=target_position)
 
         model_info = self.model_info()
         return FlowAnalysisResult(
@@ -99,6 +102,10 @@ class TransformerLensAdapter(ModelAdapter):
             token_limit=len(visible_tokens),
             token_limit_applied=False,
             steps=steps,
+            target_position=target_position,
+            target_token_id=target_token_id,
+            target_token=self._display_token(target_token_id),
+            layer_top_tokens=layer_top_tokens,
         )
 
     def release(self) -> None:
@@ -245,6 +252,39 @@ class TransformerLensAdapter(ModelAdapter):
             scale=round(scale, 6),
             encoded_field=encode_signed_field(field, scale),
         )
+
+    def _build_layer_top_tokens(self, cache: dict[str, torch.Tensor], target_position: int) -> list[LayerTopTokens]:
+        model_info = self.model_info()
+        layer_top_tokens: list[LayerTopTokens] = []
+
+        layer_stage_hooks = self._layer_stage_hooks()
+        for layer_index in range(model_info.layer_count):
+            hook_name = f"blocks.{layer_index}.{layer_stage_hooks['resid_after_mlp']}"
+            tensor = cache.get(hook_name)
+            if tensor is None:
+                raise RuntimeError(f"Missing {hook_name} in cache for {self.model_id}")
+            layer_top_tokens.append(
+                LayerTopTokens(
+                    layer_index=layer_index,
+                    top_tokens=self._top_tokens_from_hidden(tensor[0, target_position, :]),
+                )
+            )
+
+        return layer_top_tokens
+
+    def _top_tokens_from_hidden(self, hidden: torch.Tensor) -> list[LogitToken]:
+        logits = self._project_hidden_to_logits(hidden)
+        return self._top_tokens_from_logits(logits)
+
+    def _project_hidden_to_logits(self, hidden: torch.Tensor) -> torch.Tensor:
+        residual = hidden.unsqueeze(0).unsqueeze(0)
+        if self._model.cfg.normalization_type is not None:
+            residual = self._model.ln_final(residual)
+        logits = self._model.unembed(residual)[0, 0, :]
+        return apply_logit_soft_cap(logits, self._model.cfg.output_logits_soft_cap)
+
+    def _top_tokens_from_logits(self, logits: torch.Tensor) -> list[LogitToken]:
+        return top_logit_tokens(logits, self._display_token, LogitToken)
 
     def _display_token(self, token_id: int) -> str:
         text = self._model.to_string([token_id])

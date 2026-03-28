@@ -8,67 +8,81 @@
   </head>
   <body>
     <main class="shell">
-      <section class="hero">
-        <div class="hero-main">
-          <h1>Activation Storm</h1>
-          <p class="lede">Layer-by-layer prompt flow through attention, residual paths, MLPs, and embeddings.</p>
-        </div>
-        <div class="hero-meta">
-          <span id="status-pill" class="pill idle">Idle</span>
-          <span id="model-meta" class="meta-copy">Loading model metadata…</span>
-        </div>
-      </section>
-
-      <section class="workspace-bar">
-        <div class="controls">
-          <label class="field compact-field model-field">
-            <span>Model</span>
-            <select id="model-select"></select>
-            <button id="architecture-button" class="architecture-trigger" type="button">See architecture</button>
-          </label>
-          <label class="field prompt-field">
-            <span>Prompt</span>
-            <textarea id="prompt-input" rows="4">Loading default prompt…</textarea>
-          </label>
-          <div class="actions">
-            <button id="analyze-button" type="button">Analyze Flow</button>
-            <button id="play-button" class="button-secondary" type="button" disabled>Play</button>
+      <div class="main-column">
+        <section class="hero">
+          <div class="hero-main">
+            <h1>Activation Storm</h1>
+            <p class="lede">Layer-by-layer prompt flow through attention, residual paths, MLPs, and embeddings.</p>
           </div>
-        </div>
+          <div class="hero-meta">
+            <span id="status-pill" class="pill idle">Idle</span>
+            <span id="model-meta" class="meta-copy">Loading model metadata…</span>
+          </div>
+        </section>
 
-        <div class="filters">
-          <div class="field">
-            <span>Show Stages</span>
-            <div class="toggle-group segmented-control">
-              <label class="toggle-pill"><input id="toggle-emb" type="checkbox" checked /> <span>Emb</span></label>
-              <label class="toggle-pill"><input id="toggle-attn" type="checkbox" checked /> <span>Attn</span></label>
-              <label class="toggle-pill"><input id="toggle-resid" type="checkbox" checked /> <span>Resid</span></label>
-              <label class="toggle-pill"><input id="toggle-mlp" type="checkbox" checked /> <span>MLP</span></label>
+        <section class="workspace-bar">
+          <div class="controls">
+            <label class="field compact-field model-field">
+              <span>Model</span>
+              <select id="model-select"></select>
+              <button id="architecture-button" class="architecture-trigger" type="button">See architecture</button>
+            </label>
+            <label class="field prompt-field">
+              <span>Prompt</span>
+              <textarea id="prompt-input" rows="4">Loading default prompt…</textarea>
+            </label>
+            <div class="actions">
+              <button id="analyze-button" type="button">Analyze Flow</button>
+              <button id="play-button" class="button-secondary" type="button" disabled>Play</button>
             </div>
           </div>
-          <div class="field">
-            <span>Token Axis</span>
-            <label class="toggle-pill single-toggle"><input id="toggle-special" type="checkbox" /> <span>Include special tokens</span></label>
-          </div>
-        </div>
-      </section>
 
-      <section class="visualization-card">
-        <div class="timeline">
-          <div class="timeline-header">
-            <span id="step-label">Step: —</span>
-            <span id="step-counter">0 / 0</span>
+          <div class="filters">
+            <div class="field">
+              <span>Show Stages</span>
+              <div class="toggle-group segmented-control">
+                <label class="toggle-pill"><input id="toggle-emb" type="checkbox" checked /> <span>Emb</span></label>
+                <label class="toggle-pill"><input id="toggle-attn" type="checkbox" checked /> <span>Attn</span></label>
+                <label class="toggle-pill"><input id="toggle-resid" type="checkbox" checked /> <span>Resid</span></label>
+                <label class="toggle-pill"><input id="toggle-mlp" type="checkbox" checked /> <span>MLP</span></label>
+              </div>
+            </div>
+            <div class="field">
+              <span>Token Axis</span>
+              <label class="toggle-pill single-toggle"><input id="toggle-special" type="checkbox" /> <span>Include special tokens</span></label>
+            </div>
           </div>
-          <input id="step-slider" type="range" min="0" max="0" value="0" disabled />
-          <div id="token-strip" class="token-strip"></div>
-          <p id="analysis-note" class="analysis-note"></p>
-        </div>
-        <canvas id="storm-canvas"></canvas>
-        <div class="legend">
-          <span><i class="legend-dot positive"></i> Cyan means positive activation.</span>
-          <span><i class="legend-dot negative"></i> Pink means negative activation.</span>
-        </div>
-      </section>
+        </section>
+      </div>
+
+      <div class="visualization-wrap">
+        <section class="visualization-card">
+          <div class="timeline">
+            <div class="timeline-header">
+              <span id="step-label">Step: —</span>
+              <span id="step-counter">0 / 0</span>
+            </div>
+            <input id="step-slider" type="range" min="0" max="0" value="0" disabled />
+            <div id="token-strip" class="token-strip"></div>
+            <p id="analysis-note" class="analysis-note"></p>
+          </div>
+          <canvas id="storm-canvas"></canvas>
+          <div class="legend">
+            <span><i class="legend-dot positive"></i> Positive activation </span>
+            <span><i class="legend-dot negative"></i> Negative activation </span>
+          </div>
+        </section>
+
+        <aside class="logit-panels">
+          <article class="logit-panel">
+            <div class="logit-panel-header">
+              <span>Layer LogitLens</span>
+              <span id="logits-meta" class="logit-panel-meta">Awaiting analysis</span>
+            </div>
+            <div id="logits-list" class="logit-list"></div>
+          </article>
+        </aside>
+      </div>
     </main>
 
 

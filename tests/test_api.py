@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from activation_storm.api import ActivationStormApp
-from activation_storm.types import FlowAnalysisResult, FlowStep, ModelInfo
+from activation_storm.types import FlowAnalysisResult, FlowStep, LayerTopTokens, LogitToken, ModelInfo
 
 
 class FakeAdapter:
@@ -54,6 +54,24 @@ class FakeAdapter:
                     encoded_field='AAAA',
                 )
             ],
+            target_position=1,
+            target_token_id=42,
+            target_token='hello',
+            layer_top_tokens=[
+                LayerTopTokens(
+                    layer_index=0,
+                    top_tokens=[
+                        LogitToken(token_id=1, token='world', logit=3.5),
+                        LogitToken(token_id=2, token='there', logit=2.25),
+                    ],
+                ),
+                LayerTopTokens(
+                    layer_index=1,
+                    top_tokens=[
+                        LogitToken(token_id=3, token='again', logit=1.75),
+                    ],
+                ),
+            ],
         )
 
 
@@ -82,6 +100,10 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload['steps'][0]['stage_id'], 'embeddings')
         self.assertEqual(payload['steps'][1]['stage_id'], 'attn_out')
         self.assertEqual(payload['steps'][0]['rows'], 1)
+        self.assertEqual(payload['target_position'], 1)
+        self.assertEqual(payload['target_token'], 'hello')
+        self.assertEqual(payload['layer_top_tokens'][0]['top_tokens'][0]['token'], 'world')
+        self.assertEqual(payload['layer_top_tokens'][1]['layer_index'], 1)
 
     def test_architecture_payload_returns_model_printout(self):
         payload = self.app.architecture_payload('fake')
