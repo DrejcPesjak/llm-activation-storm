@@ -20,6 +20,18 @@ TL_STAGE_LABELS = {
     "mlp_out": "MLP",
     "resid_after_mlp": "RESID",
 }
+PARALLEL_TL_STAGE_SEQUENCE = ["embeddings", "attn_out", "mlp_out", "resid_after_mlp"]
+SEQUENTIAL_LAYER_STAGE_HOOKS = {
+    "attn_out": "hook_attn_out",
+    "resid_after_attn": "hook_resid_mid",
+    "mlp_out": "hook_mlp_out",
+    "resid_after_mlp": "hook_resid_post",
+}
+PARALLEL_LAYER_STAGE_HOOKS = {
+    "attn_out": "hook_attn_out",
+    "mlp_out": "hook_mlp_out",
+    "resid_after_mlp": "hook_resid_post",
+}
 
 
 class TransformerLensAdapter(ModelAdapter):
@@ -104,7 +116,7 @@ class TransformerLensAdapter(ModelAdapter):
             label=self._spec.label,
             layer_count=self._spec.layer_count,
             layer_width=self._spec.layer_width,
-            stage_sequence=TL_STAGE_SEQUENCE,
+            stage_sequence=self._stage_sequence(),
             prompt_mode=self._spec.prompt_mode,
             default_prompt=DEFAULT_PROMPTS[self._spec.prompt_mode],
         )
@@ -161,14 +173,10 @@ class TransformerLensAdapter(ModelAdapter):
     def _cache_names(self) -> list[str]:
         model_info = self.model_info()
         names = ["hook_embed"]
+        layer_stage_hooks = self._layer_stage_hooks()
         for layer_index in range(model_info.layer_count):
             names.extend(
-                [
-                    f"blocks.{layer_index}.hook_attn_out",
-                    f"blocks.{layer_index}.hook_resid_mid",
-                    f"blocks.{layer_index}.hook_mlp_out",
-                    f"blocks.{layer_index}.hook_resid_post",
-                ]
+                f"blocks.{layer_index}.{hook_name}" for hook_name in layer_stage_hooks.values()
             )
         return names
 
@@ -192,21 +200,14 @@ class TransformerLensAdapter(ModelAdapter):
         )
         step_index += 1
 
+        layer_stage_hooks = self._layer_stage_hooks()
         for layer_index in range(model_info.layer_count):
-            for stage_id, hook_name in (
-                ("attn_out", f"blocks.{layer_index}.hook_attn_out"),
-                ("resid_after_attn", f"blocks.{layer_index}.hook_resid_mid"),
-                ("mlp_out", f"blocks.{layer_index}.hook_mlp_out"),
-                ("resid_after_mlp", f"blocks.{layer_index}.hook_resid_post"),
-            ):
+            for stage_id in model_info.stage_sequence:
+                if stage_id == "embeddings":
+                    continue
+                hook_name = f"blocks.{layer_index}.{layer_stage_hooks[stage_id]}"
                 tensor = cache.get(hook_name)
                 if tensor is None:
-                    if stage_id == "resid_after_attn":
-                        raise RuntimeError(
-                            f"Missing {hook_name} in cache for {self.model_id}. "
-                            "This model likely uses a block structure without a real resid_mid stage "
-                            "(for example parallel attention+MLP), which is not yet supported."
-                        )
                     raise RuntimeError(f"Missing {hook_name} in cache for {self.model_id}")
                 steps.append(
                     self._build_step(
@@ -252,6 +253,16 @@ class TransformerLensAdapter(ModelAdapter):
 
     def _token_ids_for_text(self, text: str) -> list[int]:
         return self._model.to_tokens(text, move_to_device=False)[0].detach().cpu().tolist()
+
+    def _stage_sequence(self) -> list[str]:
+        if self._spec.parallel_attn_mlp:
+            return PARALLEL_TL_STAGE_SEQUENCE.copy()
+        return TL_STAGE_SEQUENCE.copy()
+
+    def _layer_stage_hooks(self) -> dict[str, str]:
+        if self._spec.parallel_attn_mlp:
+            return PARALLEL_LAYER_STAGE_HOOKS
+        return SEQUENTIAL_LAYER_STAGE_HOOKS
 
 
 def find_subsequence(sequence: list[int], subsequence: list[int]) -> int | None:

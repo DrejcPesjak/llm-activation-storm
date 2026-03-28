@@ -5,7 +5,12 @@ import unittest
 from transformer_lens.loading_from_pretrained import get_official_model_name
 
 from activation_storm.adapters import TL_MODEL_SPECS
-from activation_storm.transformer_lens_adapter import find_subsequence
+from activation_storm.transformer_lens_adapter import (
+    PARALLEL_TL_STAGE_SEQUENCE,
+    TL_STAGE_SEQUENCE,
+    TransformerLensAdapter,
+    find_subsequence,
+)
 
 
 class AdapterConfigTests(unittest.TestCase):
@@ -15,9 +20,9 @@ class AdapterConfigTests(unittest.TestCase):
         self.assertEqual(len(model_ids), len(set(model_ids)))
         self.assertTrue(all(model_id for model_id in model_ids))
         self.assertTrue(all(label for label in labels))
-        self.assertNotIn("pythia-160m", model_ids)
-        self.assertNotIn("pythia-1b", model_ids)
-        self.assertNotIn("pythia-2.8b", model_ids)
+        self.assertIn("pythia-160m", model_ids)
+        self.assertIn("pythia-1b", model_ids)
+        self.assertIn("pythia-2.8b", model_ids)
 
     def test_tl_model_specs_resolve_via_transformer_lens_alias_map(self):
         resolved = {spec.model_id: get_official_model_name(spec.model_id) for spec in TL_MODEL_SPECS}
@@ -31,6 +36,26 @@ class AdapterConfigTests(unittest.TestCase):
         self.assertTrue(qwen_specs["qwen-1.8b"].trust_remote_code)
         self.assertTrue(qwen_specs["qwen-1.8b-chat"].trust_remote_code)
         self.assertTrue(qwen_specs["qwen3-1.7b"].trust_remote_code)
+
+    def test_pythia_specs_mark_parallel_attention_mlp(self):
+        pythia_specs = {spec.model_id: spec for spec in TL_MODEL_SPECS if spec.model_id.startswith("pythia")}
+        self.assertTrue(pythia_specs["pythia-160m"].parallel_attn_mlp)
+        self.assertTrue(pythia_specs["pythia-1b"].parallel_attn_mlp)
+        self.assertTrue(pythia_specs["pythia-2.8b"].parallel_attn_mlp)
+
+
+class TransformerLensStageTests(unittest.TestCase):
+    def test_stage_sequence_is_reduced_for_parallel_models(self):
+        parallel_spec = next(spec for spec in TL_MODEL_SPECS if spec.model_id == "pythia-160m")
+        adapter = TransformerLensAdapter.__new__(TransformerLensAdapter)
+        adapter._spec = parallel_spec
+        self.assertEqual(adapter._stage_sequence(), PARALLEL_TL_STAGE_SEQUENCE)
+
+    def test_stage_sequence_is_full_for_sequential_models(self):
+        sequential_spec = next(spec for spec in TL_MODEL_SPECS if spec.model_id == "gpt2-small")
+        adapter = TransformerLensAdapter.__new__(TransformerLensAdapter)
+        adapter._spec = sequential_spec
+        self.assertEqual(adapter._stage_sequence(), TL_STAGE_SEQUENCE)
 
 
 class FindSubsequenceTests(unittest.TestCase):
