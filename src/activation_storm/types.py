@@ -10,6 +10,8 @@ class ModelInfo:
     layer_count: int
     layer_width: int
     stage_sequence: list[str]
+    prompt_mode: str = "base"
+    default_prompt: str = "The capital of France is"
 
     def to_dict(self) -> dict:
         return asdict(self)

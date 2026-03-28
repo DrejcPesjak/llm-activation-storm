@@ -26,9 +26,13 @@
 html,
 body {
   margin: 0;
-  min-height: 100%;
+  min-height: 100vh;
   color: var(--text);
-  background: linear-gradient(180deg, var(--bg-top), var(--bg-mid) 55%, var(--bg-bottom));
+  background-color: var(--bg-bottom);
+  background-image:
+    radial-gradient(circle at top center, rgba(20, 38, 58, 0.24), transparent 44%),
+    linear-gradient(180deg, var(--bg-top), var(--bg-mid) 55%, var(--bg-bottom));
+  background-attachment: fixed;
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
 }
 
@@ -43,7 +47,7 @@ body::before {
 .shell {
   width: min(1920px, calc(100vw - 40px));
   margin: 0 auto;
-  padding: 18px 0 24px;
+  padding: 18px 0 48px;
 }
 
 .hero,
@@ -100,7 +104,6 @@ h1 {
 
 .lede {
   font-size: 0.88rem;
-  max-width: 560px;
 }
 
 .hero-meta {

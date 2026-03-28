@@ -19,6 +19,8 @@ class FakeAdapter:
             layer_count=2,
             layer_width=4,
             stage_sequence=['embeddings', 'attn_out', 'resid_after_attn', 'mlp_out', 'resid_after_mlp'],
+            prompt_mode='base',
+            default_prompt='The capital of France is',
         )
 
     def analyze_prompt(self, prompt: str, include_special_tokens: bool = False) -> FlowAnalysisResult:
@@ -60,8 +62,7 @@ class ApiTests(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         static_dir = Path(self.tempdir.name)
         (static_dir / 'index.html').write_text('<h1>ok</h1>', encoding='utf-8')
-        self.app = ActivationStormApp(static_dir=static_dir)
-        self.app.registry = {'fake': FakeAdapter()}
+        self.app = ActivationStormApp(static_dir=static_dir, registry={'fake': FakeAdapter()})
 
     def tearDown(self):
         self.tempdir.cleanup()
