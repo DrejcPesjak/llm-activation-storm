@@ -14,14 +14,17 @@ class TLModelSpec:
     prompt_mode: str
     layer_count: int
     layer_width: int
+    trust_remote_code: bool = False
 
 
 TL_MODEL_SPECS = [
     TLModelSpec("gpt2-small", "GPT-2 Small", "base", 12, 768),
     TLModelSpec("gpt2-xl", "GPT-2 XL", "base", 48, 1600),
-    TLModelSpec("pythia-160m", "Pythia 160M", "base", 12, 768),
-    TLModelSpec("pythia-1b", "Pythia 1B", "base", 16, 2048),
-    TLModelSpec("pythia-2.8b", "Pythia 2.8B", "base", 32, 2560),
+    # TODO: Pythia doesn't have a real hook_resid_mid stage
+    # blocks without assuming a real hook_resid_mid stage.
+    # TLModelSpec("pythia-160m", "Pythia 160M", "base", 12, 768),
+    # TLModelSpec("pythia-1b", "Pythia 1B", "base", 16, 2048),
+    # TLModelSpec("pythia-2.8b", "Pythia 2.8B", "base", 32, 2560),
     TLModelSpec("llama-7b", "LLaMA 7B", "base", 32, 4096),
     TLModelSpec("llama-2-7b", "Llama 2 7B", "base", 32, 4096),
     TLModelSpec("llama-2-7b-chat", "Llama 2 7B Chat", "chat", 32, 4096),
@@ -30,9 +33,9 @@ TL_MODEL_SPECS = [
     TLModelSpec("meta-llama/Llama-3.2-1B-Instruct", "Llama 3.2 1B Instruct", "chat", 16, 2048),
     TLModelSpec("meta-llama/Llama-3.2-3B-Instruct", "Llama 3.2 3B Instruct", "chat", 28, 3072),
     TLModelSpec("mistral-7b", "Mistral 7B", "base", 32, 4096),
-    TLModelSpec("qwen-1.8b", "Qwen 1.8B", "base", 24, 2048),
-    TLModelSpec("qwen-1.8b-chat", "Qwen 1.8B Chat", "chat", 24, 2048),
-    TLModelSpec("qwen3-1.7b", "Qwen3 1.7B", "base", 28, 2048),
+    TLModelSpec("qwen-1.8b", "Qwen 1.8B", "base", 24, 2048, trust_remote_code=True),
+    TLModelSpec("qwen-1.8b-chat", "Qwen 1.8B Chat", "chat", 24, 2048, trust_remote_code=True),
+    TLModelSpec("qwen3-1.7b", "Qwen3 1.7B", "base", 28, 2048, trust_remote_code=True),
     TLModelSpec("gemma-2-2b-it", "Gemma 2 2B IT", "chat", 26, 2304),
     TLModelSpec("gemma-3-1b-it", "Gemma 3 1B IT", "chat", 26, 1152),
 ]

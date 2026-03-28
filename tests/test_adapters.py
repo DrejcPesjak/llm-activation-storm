@@ -15,6 +15,9 @@ class AdapterConfigTests(unittest.TestCase):
         self.assertEqual(len(model_ids), len(set(model_ids)))
         self.assertTrue(all(model_id for model_id in model_ids))
         self.assertTrue(all(label for label in labels))
+        self.assertNotIn("pythia-160m", model_ids)
+        self.assertNotIn("pythia-1b", model_ids)
+        self.assertNotIn("pythia-2.8b", model_ids)
 
     def test_tl_model_specs_resolve_via_transformer_lens_alias_map(self):
         resolved = {spec.model_id: get_official_model_name(spec.model_id) for spec in TL_MODEL_SPECS}
@@ -22,6 +25,12 @@ class AdapterConfigTests(unittest.TestCase):
         self.assertEqual(resolved["llama-7b"], "llama-7b-hf")
         self.assertEqual(resolved["qwen3-1.7b"], "Qwen/Qwen3-1.7B")
         self.assertEqual(resolved["gemma-3-1b-it"], "google/gemma-3-1b-it")
+
+    def test_qwen_specs_require_remote_code_explicitly(self):
+        qwen_specs = {spec.model_id: spec for spec in TL_MODEL_SPECS if spec.model_id.startswith("qwen")}
+        self.assertTrue(qwen_specs["qwen-1.8b"].trust_remote_code)
+        self.assertTrue(qwen_specs["qwen-1.8b-chat"].trust_remote_code)
+        self.assertTrue(qwen_specs["qwen3-1.7b"].trust_remote_code)
 
 
 class FindSubsequenceTests(unittest.TestCase):

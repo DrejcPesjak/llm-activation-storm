@@ -25,6 +25,7 @@ class Gemma3Adapter(ModelAdapter):
         self._tokenizer = None
         config = AutoConfig.from_pretrained(self.model_id)
         text_config = config.text_config
+        self._max_length = getattr(text_config, "max_position_embeddings", None)
         self._model_info = ModelInfo(
             id=self.model_id,
             label=self.label,
@@ -146,6 +147,7 @@ class Gemma3Adapter(ModelAdapter):
             return_tensors="pt",
             padding=True,
             truncation=True,
+            max_length=self._max_length,
             add_special_tokens=True,
         )
 
@@ -176,17 +178,29 @@ class Gemma3Adapter(ModelAdapter):
 
     def _strip_vision_modules(self) -> None:
         model = self._model
-
-        if hasattr(model, "vision_model"):
-            del model.vision_model
+        self._detach_component(model, "vision_model")
         for attr in ("vision", "image_processor", "visual", "vision_tower"):
-            if hasattr(model, attr):
-                delattr(model, attr)
+            self._detach_component(model, attr)
         if hasattr(model, "model"):
-            for attr in ("vision_tower", "mm_projector", "image_newline"):
-                if hasattr(model.model, attr):
-                    delattr(model.model, attr)
+            for attr in ("vision_tower", "multi_modal_projector", "mm_projector", "image_newline"):
+                self._detach_component(model.model, attr)
 
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+
+    def _detach_component(self, parent, attr: str) -> None:
+        if not hasattr(parent, attr):
+            return
+
+        component = getattr(parent, attr)
+        if hasattr(component, "to"):
+            try:
+                component.to("cpu")
+            except Exception:
+                pass
+
+        try:
+            setattr(parent, attr, None)
+        except Exception:
+            pass

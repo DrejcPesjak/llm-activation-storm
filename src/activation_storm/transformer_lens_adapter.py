@@ -119,6 +119,7 @@ class TransformerLensAdapter(ModelAdapter):
             self.model_id,
             device=device,
             dtype=dtype,
+            trust_remote_code=self._spec.trust_remote_code,
         )
 
     def _render_prompt(self, prompt: str) -> str:
@@ -200,6 +201,12 @@ class TransformerLensAdapter(ModelAdapter):
             ):
                 tensor = cache.get(hook_name)
                 if tensor is None:
+                    if stage_id == "resid_after_attn":
+                        raise RuntimeError(
+                            f"Missing {hook_name} in cache for {self.model_id}. "
+                            "This model likely uses a block structure without a real resid_mid stage "
+                            "(for example parallel attention+MLP), which is not yet supported."
+                        )
                     raise RuntimeError(f"Missing {hook_name} in cache for {self.model_id}")
                 steps.append(
                     self._build_step(

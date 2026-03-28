@@ -10,7 +10,7 @@
 - [ ] Add more llm models and families (llama, gemma2, pythia)
 - [ ] Migrate to `transformer-lens` and use `run_with_cache`
     - [x] TransformerLens adapter
-    - [ ] Qwen loading problems (transformers 5.4 incompatibility)
+    - [x] Qwen loading problems (transformers 5.4 incompatibility)
     - [ ] Might have a memory leak (VRAM model swithing is ok)
 - [ ] Add activation metrics:
     - Residual anisotropy
