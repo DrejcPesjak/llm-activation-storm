@@ -8,7 +8,7 @@
 - [x] Add layer 0 (embeddings)
 - [ ] Add per attn head vis
 - [ ] Add more llm models and families (llama, gemma2, pythia)
-- [ ] Migrate to `transformer-lens` and use `run_with_cache`
+- [x] Migrate to `transformer-lens` and use `run_with_cache`
     - [x] TransformerLens adapter
     - [x] Qwen loading problems (transformers 5.4 incompatibility)
     - [ ] Might have a memory leak (VRAM model swithing is ok)

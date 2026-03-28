@@ -6,7 +6,9 @@ Activation Storm is a local browser app for visualizing activations from a promp
 
 You enter a prompt, run one forward pass, and inspect the flow across the network. The top band shows the full model at once. The lower panel shows the currently selected layer-stage slice as a `tokens x hidden_dim` field. The timeline moves through layer computation steps, not generated output tokens.
 
-Right now only `google/gemma-3-4b-it` is supported.
+The app now supports:
+- custom `google/gemma-3-4b-it` handling for the low-VRAM Gemma 3 path
+- a small TransformerLens-backed model set from the dropdown, including GPT-2, Pythia, Llama, Mistral, Qwen, Gemma 2, and Gemma 3 1B variants
 
 For each layer, the app captures:
 - `attn_out`
@@ -24,7 +26,7 @@ Setup:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install torch accelerate transformers transformer-lens
+pip install torch accelerate transformer-lens
 ```
 
 Run:
