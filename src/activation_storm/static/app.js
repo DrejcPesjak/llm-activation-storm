@@ -1,10 +1,12 @@
 const state = {
   payload: null,
+  models: [],
   allTextures: [],
   visibleTextures: [],
   visibleIndex: 0,
   playing: false,
   timer: null,
+  lastPromptWasDefault: true,
 };
 
 const elements = {
@@ -246,6 +248,34 @@ function updateStepLabel() {
   }
   elements.stepLabel.textContent = `Step: ${stepTitle(step)}`;
   elements.stepCounter.textContent = `${state.visibleIndex + 1} / ${state.visibleTextures.length}`;
+}
+
+function describeModel(model) {
+  if (!model) {
+    return "Model metadata unavailable.";
+  }
+  if (model.layer_count > 0 && model.layer_width > 0) {
+    return `${model.label} • ${model.layer_count} layers • width ${model.layer_width}`;
+  }
+  return `${model.label} • metadata unavailable until model config is accessible`;
+}
+
+function defaultPromptForModel(model) {
+  return model?.default_prompt || "The capital of France is";
+}
+
+function updateSelectedModelUi({ resetPrompt = false } = {}) {
+  const active = state.models.find((model) => model.id === elements.modelSelect.value) || null;
+  elements.modelMeta.textContent = describeModel(active);
+
+  if (!active) {
+    return;
+  }
+
+  if (resetPrompt || state.lastPromptWasDefault) {
+    elements.promptInput.value = defaultPromptForModel(active);
+    state.lastPromptWasDefault = true;
+  }
 }
 
 function setVisibleStep(index) {
@@ -519,6 +549,7 @@ function render() {
 
 async function loadModels() {
   const payload = await fetchJson("/api/models");
+  state.models = payload.models;
   elements.modelSelect.innerHTML = "";
   payload.models.forEach((model) => {
     const option = document.createElement("option");
@@ -527,10 +558,7 @@ async function loadModels() {
     elements.modelSelect.appendChild(option);
   });
   elements.modelSelect.value = payload.default_model;
-  const active = payload.models.find((model) => model.id === payload.default_model);
-  if (active) {
-    elements.modelMeta.textContent = `${active.label} • ${active.layer_count} layers • width ${active.layer_width}`;
-  }
+  updateSelectedModelUi({ resetPrompt: true });
 }
 
 async function analyzePrompt() {
@@ -595,6 +623,13 @@ elements.toggleSpecial.addEventListener("change", () => {
   }
 });
 window.addEventListener("resize", resizeCanvas);
+elements.promptInput.addEventListener("input", () => {
+  const active = state.models.find((model) => model.id === elements.modelSelect.value) || null;
+  state.lastPromptWasDefault = elements.promptInput.value === defaultPromptForModel(active);
+});
+elements.modelSelect.addEventListener("change", () => {
+  updateSelectedModelUi({ resetPrompt: true });
+});
 
 loadModels()
   .then(() => {

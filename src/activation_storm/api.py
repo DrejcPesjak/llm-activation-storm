@@ -12,9 +12,9 @@ from .adapters import build_registry
 
 
 class ActivationStormApp:
-    def __init__(self, static_dir: Path) -> None:
+    def __init__(self, static_dir: Path, registry: dict | None = None) -> None:
         self.static_dir = static_dir
-        self.registry = build_registry()
+        self.registry = registry if registry is not None else build_registry()
 
     def models_payload(self) -> dict:
         models = [adapter.model_info().to_dict() for adapter in self.registry.values()]

@@ -1,177 +1,95 @@
 from __future__ import annotations
 
-import gc
 import threading
+from collections.abc import Callable
+from dataclasses import dataclass
 
-import torch
-from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
-
-from .capture import STAGE_SPECS, build_flow_steps, build_stage_hooks
-from .types import FlowAnalysisResult, FlowStep, ModelInfo
+from .types import FlowAnalysisResult, ModelInfo
 
 
-class Gemma3Adapter:
-    model_id = "google/gemma-3-4b-it"
-    label = "Gemma 3 4B IT"
+@dataclass(frozen=True)
+class TLModelSpec:
+    model_id: str
+    label: str
+    prompt_mode: str
+    layer_count: int
+    layer_width: int
 
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._model = None
-        self._tokenizer = None
-        config = AutoConfig.from_pretrained(self.model_id)
-        text_config = config.text_config
-        self._model_info = ModelInfo(
-            id=self.model_id,
-            label=self.label,
-            layer_count=int(text_config.num_hidden_layers),
-            layer_width=int(text_config.hidden_size),
-            stage_sequence=[stage_id for stage_id, _label in STAGE_SPECS],
-        )
+
+TL_MODEL_SPECS = [
+    TLModelSpec("gpt2-small", "GPT-2 Small", "base", 12, 768),
+    TLModelSpec("gpt2-xl", "GPT-2 XL", "base", 48, 1600),
+    TLModelSpec("pythia-160m", "Pythia 160M", "base", 12, 768),
+    TLModelSpec("pythia-1b", "Pythia 1B", "base", 16, 2048),
+    TLModelSpec("pythia-2.8b", "Pythia 2.8B", "base", 32, 2560),
+    TLModelSpec("llama-7b", "LLaMA 7B", "base", 32, 4096),
+    TLModelSpec("llama-2-7b", "Llama 2 7B", "base", 32, 4096),
+    TLModelSpec("llama-2-7b-chat", "Llama 2 7B Chat", "chat", 32, 4096),
+    TLModelSpec("meta-llama/Llama-3.2-1B", "Llama 3.2 1B", "base", 16, 2048),
+    TLModelSpec("meta-llama/Llama-3.2-3B", "Llama 3.2 3B", "base", 28, 3072),
+    TLModelSpec("meta-llama/Llama-3.2-1B-Instruct", "Llama 3.2 1B Instruct", "chat", 16, 2048),
+    TLModelSpec("meta-llama/Llama-3.2-3B-Instruct", "Llama 3.2 3B Instruct", "chat", 28, 3072),
+    TLModelSpec("mistral-7b", "Mistral 7B", "base", 32, 4096),
+    TLModelSpec("qwen-1.8b", "Qwen 1.8B", "base", 24, 2048),
+    TLModelSpec("qwen-1.8b-chat", "Qwen 1.8B Chat", "chat", 24, 2048),
+    TLModelSpec("qwen3-1.7b", "Qwen3 1.7B", "base", 28, 2048),
+    TLModelSpec("gemma-2-2b-it", "Gemma 2 2B IT", "chat", 26, 2304),
+    TLModelSpec("gemma-3-1b-it", "Gemma 3 1B IT", "chat", 26, 1152),
+]
+
+DEFAULT_PROMPTS = {
+    "base": "The capital of France is",
+    "chat": "Who is the best basketball player of all time?",
+}
+
+
+class ModelAdapter:
+    model_id: str
 
     def model_info(self) -> ModelInfo:
-        return self._model_info
+        raise NotImplementedError
 
     def architecture_text(self) -> str:
-        with self._lock:
-            self._ensure_loaded()
-            return str(self._model)
+        raise NotImplementedError
 
     def analyze_prompt(self, prompt: str, include_special_tokens: bool = False) -> FlowAnalysisResult:
-        clean_prompt = prompt.strip()
-        if not clean_prompt:
-            raise ValueError("Prompt must not be empty.")
+        raise NotImplementedError
 
+    def release(self) -> None:
+        raise NotImplementedError
+
+
+class ModelResidencyManager:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._release_callbacks: dict[str, Callable[[], None]] = {}
+        self._active_model_id: str | None = None
+
+    def register(self, model_id: str, release_callback: Callable[[], None]) -> None:
+        self._release_callbacks[model_id] = release_callback
+
+    def activate(self, model_id: str) -> None:
+        previous_model_id: str | None = None
         with self._lock:
-            self._ensure_loaded()
+            if self._active_model_id == model_id:
+                return
+            previous_model_id = self._active_model_id
+            self._active_model_id = model_id
 
-            tokenized = self._tokenize_prompt(clean_prompt)
-            input_ids = tokenized["input_ids"]
-            attention_mask = tokenized["attention_mask"]
-            positions, token_limit_applied = self._visible_positions(
-                prompt=clean_prompt,
-                input_ids=input_ids[0],
-                attention_mask=attention_mask[0],
-                include_special_tokens=include_special_tokens,
-            )
-            if not positions:
-                raise ValueError("Prompt did not produce any visible tokens.")
-
-            visible_ids = input_ids[0, positions].detach().cpu().tolist()
-            tokens = [self._display_token(token_id) for token_id in visible_ids]
-            positions_tensor = torch.tensor(positions, dtype=torch.long)
-            sink: dict[int, dict[str, torch.Tensor]] = {}
-
-            handles = build_stage_hooks(self._embedding_module(), self._layers(), sink)
-            try:
-                with torch.inference_mode():
-                    self._model(input_ids=input_ids, attention_mask=attention_mask)
-            finally:
-                for handle in handles:
-                    handle.remove()
-
-            steps = build_flow_steps(
-                sink=sink,
-                positions=positions_tensor,
-                hidden_width=self._model_info.layer_width,
-                step_factory=FlowStep,
-            )
-
-        return FlowAnalysisResult(
-            model=self._model_info,
-            tokens=tokens,
-            hidden_width=self._model_info.layer_width,
-            token_limit=len(tokens),
-            token_limit_applied=token_limit_applied,
-            steps=steps,
-        )
-
-    def _ensure_loaded(self) -> None:
-        if self._model is not None:
-            return
-
-        dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
-        self._model = AutoModelForCausalLM.from_pretrained(
-            self.model_id,
-            device_map="auto",
-            dtype=dtype,
-            low_cpu_mem_usage=True,
-        )
-        self._tokenizer = AutoTokenizer.from_pretrained(self.model_id)
-        self._tokenizer.pad_token = self._tokenizer.eos_token
-        self._tokenizer.padding_side = "right"
-        self._strip_vision_modules()
-
-    def _layers(self):
-        if hasattr(self._model, "model") and hasattr(self._model.model, "layers"):
-            return self._model.model.layers
-        if hasattr(self._model, "model") and hasattr(self._model.model, "language_model"):
-            return self._model.model.language_model.layers
-        raise RuntimeError("Could not locate model layers for activation hooks.")
-
-    def _embedding_module(self):
-        if hasattr(self._model, "model") and hasattr(self._model.model, "embed_tokens"):
-            return self._model.model.embed_tokens
-        if hasattr(self._model, "model") and hasattr(self._model.model, "language_model"):
-            language_model = self._model.model.language_model
-            if hasattr(language_model, "embed_tokens"):
-                return language_model.embed_tokens
-        raise RuntimeError("Could not locate token embedding module for activation hooks.")
-
-    def _format_chat(self, prompt: str) -> str:
-        return f"<start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n"
-
-    def _tokenize_prompt(self, prompt: str) -> dict[str, torch.Tensor]:
-        return self._tokenizer(
-            [self._format_chat(prompt)],
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            add_special_tokens=True,
-        )
-
-    def _visible_positions(
-        self,
-        prompt: str,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
-        include_special_tokens: bool,
-    ) -> tuple[list[int], bool]:
-        if include_special_tokens:
-            visible_positions = list(range(int(attention_mask.sum().item())))
-        else:
-            prefix_ids = self._tokenizer("<start_of_turn>user\n", add_special_tokens=False)["input_ids"]
-            prompt_ids = self._tokenizer(prompt, add_special_tokens=False)["input_ids"]
-            start = 1 + len(prefix_ids)
-            available = max(int(input_ids.shape[0]) - start - 5, 0)
-            end = start + min(len(prompt_ids), available)
-            visible_positions = list(range(start, end))
-
-        token_limit_applied = False
-        return visible_positions, token_limit_applied
-
-    def _display_token(self, token_id: int) -> str:
-        text = self._tokenizer.decode([token_id], skip_special_tokens=False)
-        text = text.replace("\n", "\\n")
-        return text if text else " "
-
-    def _strip_vision_modules(self) -> None:
-        model = self._model
-
-        if hasattr(model, "vision_model"):
-            del model.vision_model
-        for attr in ("vision", "image_processor", "visual", "vision_tower"):
-            if hasattr(model, attr):
-                delattr(model, attr)
-        if hasattr(model, "model"):
-            for attr in ("vision_tower", "mm_projector", "image_newline"):
-                if hasattr(model.model, attr):
-                    delattr(model.model, attr)
-
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        if previous_model_id is not None:
+            release_callback = self._release_callbacks.get(previous_model_id)
+            if release_callback is not None:
+                release_callback()
 
 
-def build_registry() -> dict[str, Gemma3Adapter]:
-    adapter = Gemma3Adapter()
-    return {adapter.model_id: adapter}
+from .gemma3_adapter import Gemma3Adapter
+from .transformer_lens_adapter import TransformerLensAdapter
+
+
+def build_registry() -> dict[str, ModelAdapter]:
+    residency = ModelResidencyManager()
+    gemma_adapter = Gemma3Adapter(residency=residency)
+    registry: dict[str, ModelAdapter] = {gemma_adapter.model_id: gemma_adapter}
+    for spec in TL_MODEL_SPECS:
+        registry[spec.model_id] = TransformerLensAdapter(spec=spec, residency=residency)
+    return registry
