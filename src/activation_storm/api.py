@@ -32,7 +32,28 @@ class ActivationStormApp:
         return self.registry[model_id].analyze_prompt(
             prompt,
             include_special_tokens=include_special_tokens,
+            include_layer_analysis=False,
         ).to_dict()
+
+    def layer_analysis_payload(self, payload: dict) -> dict:
+        model_id = payload.get("model_id")
+        prompt = payload.get("prompt", "")
+        if not model_id:
+            raise ValueError("model_id is required.")
+        if model_id not in self.registry:
+            raise ValueError(f"Unknown model_id: {model_id}")
+        include_special_tokens = bool(payload.get("include_special_tokens", False))
+        result = self.registry[model_id].analyze_prompt(
+            prompt,
+            include_special_tokens=include_special_tokens,
+            include_layer_analysis=True,
+        ).to_dict()
+        return {
+            "target_position": result["target_position"],
+            "target_token_id": result["target_token_id"],
+            "target_token": result["target_token"],
+            "layer_analysis": result["layer_analysis"],
+        }
 
     def architecture_payload(self, model_id: str) -> dict:
         if not model_id:
@@ -80,7 +101,7 @@ class ActivationStormHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
-        if path != "/api/analyze":
+        if path not in {"/api/analyze", "/api/layer-analysis"}:
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
             return
 
@@ -88,7 +109,10 @@ class ActivationStormHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
             raw = self.rfile.read(length)
             payload = json.loads(raw or b"{}")
-            result = self.app.analyze(payload)
+            if path == "/api/analyze":
+                result = self.app.analyze(payload)
+            else:
+                result = self.app.layer_analysis_payload(payload)
             self._send_json(HTTPStatus.OK, result)
         except ValueError as exc:
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})

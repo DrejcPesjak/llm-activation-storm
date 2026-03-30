@@ -7,9 +7,32 @@ import torch
 from transformer_lens import HookedTransformer
 from transformer_lens.loading_from_pretrained import get_official_model_name
 
+from .analysis_metrics import (
+    compute_activation_kurtosis,
+    compute_attention_entropy_metrics,
+    compute_logit_shift_rms,
+    compute_participation_ratio,
+    compute_target_rms,
+    compute_top_energy_share,
+)
 from .adapters import DEFAULT_PROMPTS, ModelAdapter, ModelResidencyManager, TLModelSpec
-from .capture import STAGE_SPECS, apply_logit_soft_cap, encode_signed_field, signed_scale, top_logit_tokens
-from .types import FlowAnalysisResult, FlowStep, LayerTopTokens, LogitToken, ModelInfo
+from .capture import (
+    STAGE_SPECS,
+    apply_logit_soft_cap,
+    encode_signed_field,
+    signed_scale,
+    top_logit_tokens,
+)
+from .types import (
+    ActivationMetrics,
+    AttentionMetrics,
+    ContributionMetrics,
+    FlowAnalysisResult,
+    FlowStep,
+    LayerAnalysis,
+    LogitToken,
+    ModelInfo,
+)
 
 
 TL_STAGE_SEQUENCE = [stage_id for stage_id, _stage_label in STAGE_SPECS]
@@ -56,7 +79,12 @@ class TransformerLensAdapter(ModelAdapter):
             self._ensure_loaded()
             return f"{self._spec.label}\n{self._official_model_name}\n\n{self._model}"
 
-    def analyze_prompt(self, prompt: str, include_special_tokens: bool = False) -> FlowAnalysisResult:
+    def analyze_prompt(
+        self,
+        prompt: str,
+        include_special_tokens: bool = False,
+        include_layer_analysis: bool = True,
+    ) -> FlowAnalysisResult:
         clean_prompt = prompt.strip()
         if not clean_prompt:
             raise ValueError("Prompt must not be empty.")
@@ -79,10 +107,11 @@ class TransformerLensAdapter(ModelAdapter):
             if not positions:
                 raise ValueError("Prompt did not produce any visible tokens.")
 
-            cache_names = self._cache_names()
+            cache_names = self._cache_names(include_layer_analysis=include_layer_analysis)
             with torch.inference_mode():
-                _logits, cache = self._model.run_with_cache(
+                _, cache = self._model.run_with_cache(
                     tokens,
+                    return_type=None,
                     names_filter=cache_names,
                     return_cache_object=False,
                 )
@@ -92,7 +121,13 @@ class TransformerLensAdapter(ModelAdapter):
             steps = self._build_steps_from_cache(cache=cache, positions=positions)
             target_position = len(token_ids) - 1
             target_token_id = token_ids[target_position]
-            layer_top_tokens = self._build_layer_top_tokens(cache=cache, target_position=target_position)
+            layer_analysis = []
+            if include_layer_analysis:
+                layer_analysis = self._build_layer_analysis(
+                    cache=cache,
+                    positions=positions,
+                    target_position=target_position,
+                )
 
         model_info = self.model_info()
         return FlowAnalysisResult(
@@ -105,7 +140,7 @@ class TransformerLensAdapter(ModelAdapter):
             target_position=target_position,
             target_token_id=target_token_id,
             target_token=self._display_token(target_token_id),
-            layer_top_tokens=layer_top_tokens,
+            layer_analysis=layer_analysis,
         )
 
     def release(self) -> None:
@@ -177,11 +212,13 @@ class TransformerLensAdapter(ModelAdapter):
             raise RuntimeError(f"Computed prompt span exceeds rendered token sequence for {self.model_id}.")
         return list(range(start, end))
 
-    def _cache_names(self) -> list[str]:
+    def _cache_names(self, include_layer_analysis: bool) -> list[str]:
         model_info = self.model_info()
         names = ["hook_embed"]
         layer_stage_hooks = self._layer_stage_hooks()
         for layer_index in range(model_info.layer_count):
+            if include_layer_analysis:
+                names.append(f"blocks.{layer_index}.attn.hook_pattern")
             names.extend(
                 f"blocks.{layer_index}.{hook_name}" for hook_name in layer_stage_hooks.values()
             )
@@ -253,24 +290,61 @@ class TransformerLensAdapter(ModelAdapter):
             encoded_field=encode_signed_field(field, scale),
         )
 
-    def _build_layer_top_tokens(self, cache: dict[str, torch.Tensor], target_position: int) -> list[LayerTopTokens]:
+    def _build_layer_analysis(
+        self,
+        cache: dict[str, torch.Tensor],
+        positions: list[int],
+        target_position: int,
+    ) -> list[LayerAnalysis]:
         model_info = self.model_info()
-        layer_top_tokens: list[LayerTopTokens] = []
+        position_tensor = torch.tensor(positions, dtype=torch.long)
+        layer_analysis: list[LayerAnalysis] = []
+        embedding = cache.get("hook_embed")
+        if embedding is None:
+            raise RuntimeError(f"Missing hook_embed in cache for {self.model_id}")
+        previous_logits = self._project_hidden_to_logits(embedding[0, target_position, :])
 
         layer_stage_hooks = self._layer_stage_hooks()
         for layer_index in range(model_info.layer_count):
-            hook_name = f"blocks.{layer_index}.{layer_stage_hooks['resid_after_mlp']}"
-            tensor = cache.get(hook_name)
-            if tensor is None:
-                raise RuntimeError(f"Missing {hook_name} in cache for {self.model_id}")
-            layer_top_tokens.append(
-                LayerTopTokens(
-                    layer_index=layer_index,
-                    top_tokens=self._top_tokens_from_hidden(tensor[0, target_position, :]),
-                )
+            resid_hook_name = f"blocks.{layer_index}.{layer_stage_hooks['resid_after_mlp']}"
+            resid_tensor = cache.get(resid_hook_name)
+            if resid_tensor is None:
+                raise RuntimeError(f"Missing {resid_hook_name} in cache for {self.model_id}")
+            resid_field = resid_tensor[0].detach().float().cpu().index_select(0, position_tensor)
+            target_hidden = resid_tensor[0, target_position, :]
+            current_logits = self._project_hidden_to_logits(target_hidden)
+
+            pattern_hook_name = f"blocks.{layer_index}.attn.hook_pattern"
+            pattern_tensor = cache.get(pattern_hook_name)
+            if pattern_tensor is None:
+                raise RuntimeError(f"Missing {pattern_hook_name} in cache for {self.model_id}")
+            mean_entropy, sink_mass, sink_head_ratio = compute_attention_entropy_metrics(
+                pattern_tensor[0, :, target_position, :]
             )
 
-        return layer_top_tokens
+            layer_analysis.append(
+                LayerAnalysis(
+                    layer_index=layer_index,
+                    top_tokens=self._top_tokens_from_logits(current_logits),
+                    activation_metrics=ActivationMetrics(
+                        target_rms=round(compute_target_rms(target_hidden.detach().float().cpu()), 6),
+                        kurtosis=round(compute_activation_kurtosis(resid_field), 6),
+                        top_energy_share=round(compute_top_energy_share(resid_field), 6),
+                        participation_ratio=round(compute_participation_ratio(resid_field), 6),
+                    ),
+                    attention_metrics=AttentionMetrics(
+                        mean_entropy=round(mean_entropy, 6),
+                        sink_mass=round(sink_mass, 6),
+                        sink_head_ratio=round(sink_head_ratio, 6),
+                    ),
+                    contribution_metrics=ContributionMetrics(
+                        logit_shift_rms=round(compute_logit_shift_rms(current_logits, previous_logits), 6),
+                    ),
+                ),
+            )
+            previous_logits = current_logits
+
+        return layer_analysis
 
     def _top_tokens_from_hidden(self, hidden: torch.Tensor) -> list[LogitToken]:
         logits = self._project_hidden_to_logits(hidden)

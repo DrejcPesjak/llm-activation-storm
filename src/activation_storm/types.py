@@ -43,14 +43,49 @@ class LogitToken:
 
 
 @dataclass(frozen=True)
-class LayerTopTokens:
+class ActivationMetrics:
+    target_rms: float
+    kurtosis: float
+    top_energy_share: float
+    participation_ratio: float
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class AttentionMetrics:
+    mean_entropy: float
+    sink_mass: float
+    sink_head_ratio: float
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class ContributionMetrics:
+    logit_shift_rms: float
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class LayerAnalysis:
     layer_index: int
     top_tokens: list[LogitToken]
+    activation_metrics: ActivationMetrics
+    attention_metrics: AttentionMetrics
+    contribution_metrics: ContributionMetrics
 
     def to_dict(self) -> dict:
         return {
             "layer_index": self.layer_index,
             "top_tokens": [token.to_dict() for token in self.top_tokens],
+            "activation_metrics": self.activation_metrics.to_dict(),
+            "attention_metrics": self.attention_metrics.to_dict(),
+            "contribution_metrics": self.contribution_metrics.to_dict(),
         }
 
 
@@ -65,7 +100,7 @@ class FlowAnalysisResult:
     target_position: int = -1
     target_token_id: int | None = None
     target_token: str = ""
-    layer_top_tokens: list[LayerTopTokens] = field(default_factory=list)
+    layer_analysis: list[LayerAnalysis] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -78,5 +113,5 @@ class FlowAnalysisResult:
             "target_position": self.target_position,
             "target_token_id": self.target_token_id,
             "target_token": self.target_token,
-            "layer_top_tokens": [entry.to_dict() for entry in self.layer_top_tokens],
+            "layer_analysis": [entry.to_dict() for entry in self.layer_analysis],
         }

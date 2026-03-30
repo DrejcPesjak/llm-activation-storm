@@ -1,5 +1,6 @@
 const state = {
   payload: null,
+  layerAnalysis: [],
   models: [],
   allTextures: [],
   visibleTextures: [],
@@ -7,6 +8,7 @@ const state = {
   playing: false,
   timer: null,
   lastPromptWasDefault: true,
+  analysisRequestToken: 0,
 };
 
 const elements = {
@@ -22,6 +24,12 @@ const elements = {
   analysisNote: document.getElementById("analysis-note"),
   logitsMeta: document.getElementById("logits-meta"),
   logitsList: document.getElementById("logits-list"),
+  metricsMeta: document.getElementById("metrics-meta"),
+  metricsGrid: document.getElementById("metrics-grid"),
+  attentionMeta: document.getElementById("attention-meta"),
+  attentionGrid: document.getElementById("attention-grid"),
+  depthMeta: document.getElementById("depth-meta"),
+  depthList: document.getElementById("depth-list"),
   statusPill: document.getElementById("status-pill"),
   modelMeta: document.getElementById("model-meta"),
   canvas: document.getElementById("storm-canvas"),
@@ -214,11 +222,11 @@ function renderTokenStrip() {
   });
 }
 
-function layerTopTokensMap() {
-  if (!state.payload?.layer_top_tokens) {
+function layerAnalysisMap() {
+  if (!state.layerAnalysis?.length) {
     return new Map();
   }
-  return new Map(state.payload.layer_top_tokens.map((entry) => [entry.layer_index, entry.top_tokens]));
+  return new Map(state.layerAnalysis.map((entry) => [entry.layer_index, entry]));
 }
 
 function renderLogitList(container, topTokens, emptyText) {
@@ -249,10 +257,102 @@ function renderLogitList(container, topTokens, emptyText) {
   });
 }
 
-function renderLogitPanels() {
+function formatMetricValue(value, decimals = 2, suffix = "") {
+  if (value == null || Number.isNaN(value)) {
+    return "—";
+  }
+  return `${Number(value).toFixed(decimals)}${suffix}`;
+}
+
+function renderMetricGrid(container, metrics, specs, emptyText) {
+  container.innerHTML = "";
+  if (!metrics) {
+    const empty = document.createElement("div");
+    empty.className = "logit-empty";
+    empty.textContent = emptyText;
+    container.appendChild(empty);
+    return;
+  }
+
+  specs.forEach((spec) => {
+    const card = document.createElement("div");
+    card.className = "metric-card";
+
+    const labelRow = document.createElement("div");
+    labelRow.className = "metric-label-row";
+
+    const label = document.createElement("span");
+    label.className = "metric-label";
+    label.textContent = spec.label;
+
+    const info = document.createElement("span");
+    info.className = "metric-info";
+    info.textContent = "i";
+    info.tabIndex = 0;
+    info.setAttribute("role", "img");
+    info.setAttribute("aria-label", `${spec.label}: ${spec.description}`);
+    info.dataset.tooltip = spec.description;
+
+    const value = document.createElement("span");
+    value.className = "metric-value";
+    value.textContent = formatMetricValue(metrics[spec.key], spec.decimals, spec.suffix || "");
+
+    labelRow.appendChild(label);
+    labelRow.appendChild(info);
+    card.appendChild(labelRow);
+    card.appendChild(value);
+    container.appendChild(card);
+  });
+}
+
+function renderDepthList(container, entries, activeLayerIndex) {
+  container.innerHTML = "";
+  if (!entries?.length) {
+    const empty = document.createElement("div");
+    empty.className = "logit-empty";
+    empty.textContent = "Run a prompt to inspect layer contribution shifts.";
+    container.appendChild(empty);
+    return;
+  }
+
+  const maxValue = Math.max(...entries.map((entry) => entry.contribution_metrics.logit_shift_rms), 1e-6);
+  entries.forEach((entry) => {
+    const row = document.createElement("div");
+    row.className = `depth-row${entry.layer_index === activeLayerIndex ? " active" : ""}`;
+
+    const value = document.createElement("span");
+    value.className = "depth-value";
+    value.textContent = formatMetricValue(entry.contribution_metrics.logit_shift_rms);
+
+    const barWrap = document.createElement("div");
+    barWrap.className = "depth-bar-wrap";
+
+    const bar = document.createElement("div");
+    bar.className = "depth-bar";
+    bar.style.height = `${(entry.contribution_metrics.logit_shift_rms / maxValue) * 100}%`;
+    barWrap.appendChild(bar);
+
+    const label = document.createElement("span");
+    label.className = "depth-label";
+    label.textContent = `L${String(entry.layer_index + 1).padStart(2, "0")}`;
+
+    row.appendChild(value);
+    row.appendChild(barWrap);
+    row.appendChild(label);
+    container.appendChild(row);
+  });
+}
+
+function renderAnalysisPanels() {
   if (!state.payload) {
     elements.logitsMeta.textContent = "Awaiting analysis";
     renderLogitList(elements.logitsList, [], "Run a prompt to inspect layer LogitLens results.");
+    elements.metricsMeta.textContent = "Current layer";
+    elements.attentionMeta.textContent = "Current layer";
+    elements.depthMeta.textContent = "Logit shift by layer";
+    renderMetricGrid(elements.metricsGrid, null, [], "Run a prompt to inspect activation metrics.");
+    renderMetricGrid(elements.attentionGrid, null, [], "Run a prompt to inspect attention metrics.");
+    renderDepthList(elements.depthList, [], -1);
     return;
   }
 
@@ -260,17 +360,88 @@ function renderLogitPanels() {
   if (!active) {
     elements.logitsMeta.textContent = "Select a step";
     renderLogitList(elements.logitsList, [], "No LogitLens data available.");
+    renderMetricGrid(elements.metricsGrid, null, [], "No activation metrics available.");
+    renderMetricGrid(elements.attentionGrid, null, [], "No attention metrics available.");
+    renderDepthList(elements.depthList, state.layerAnalysis || [], -1);
     return;
   }
 
   const layerIndex = Math.max(active.layer_index, 0);
-  const topTokens = layerTopTokensMap().get(layerIndex) || [];
+  const layerEntry = layerAnalysisMap().get(layerIndex) || null;
+  const topTokens = layerEntry?.top_tokens || [];
   const targetToken = state.payload.target_token === " " ? "␠" : state.payload.target_token;
   const isFinalLayer = state.payload.model && layerIndex === (state.payload.model.layer_count - 1);
   elements.logitsMeta.textContent = isFinalLayer
     ? `Final logits after ${targetToken}`
     : `Layer ${layerIndex + 1} logits after ${targetToken}`;
-  renderLogitList(elements.logitsList, topTokens, "No LogitLens data for the current layer.");
+  renderLogitList(
+    elements.logitsList,
+    topTokens,
+    state.layerAnalysis.length ? "No LogitLens data for the current layer." : "Computing LogitLens and metrics…",
+  );
+  elements.metricsMeta.textContent = `Layer ${layerIndex + 1}`;
+  elements.attentionMeta.textContent = `Layer ${layerIndex + 1}`;
+  elements.depthMeta.textContent = `Current: Layer ${layerIndex + 1}`;
+  renderMetricGrid(
+    elements.metricsGrid,
+    layerEntry?.activation_metrics,
+    [
+      { key: "target_rms", label: "Target RMS", decimals: 2, description: "Overall size of the selected token activation at this layer." },
+      { key: "kurtosis", label: "Kurtosis", decimals: 2, description: "How peaky the activation distribution is, versus being spread more evenly." },
+      { key: "top_energy_share", label: "Top 1% Energy", decimals: 1, description: "How much of the layer energy sits in the strongest 1% of channels." },
+      { key: "participation_ratio", label: "Participation", decimals: 2, description: "Roughly how many dimensions are carrying meaningful signal here." },
+    ],
+    state.layerAnalysis.length ? "No activation metrics for the current layer." : "Computing activation metrics…",
+  );
+  renderMetricGrid(
+    elements.attentionGrid,
+    layerEntry?.attention_metrics,
+    [
+      { key: "mean_entropy", label: "Mean Entropy", decimals: 2, description: "How spread out each head is over source tokens for the final position." },
+      { key: "sink_mass", label: "Sink Mass", decimals: 2, description: "How much attention flows into the first token, a common sink location." },
+      { key: "sink_head_ratio", label: "Sink Heads", decimals: 1, description: "Percent of heads that treat the first token as their main sink target." },
+    ],
+    state.layerAnalysis.length ? "No attention metrics for the current layer." : "Computing attention metrics…",
+  );
+  if (layerEntry?.activation_metrics) {
+    const energyCard = elements.metricsGrid.querySelectorAll(".metric-value")[2];
+    if (energyCard) {
+      energyCard.textContent = formatMetricValue(layerEntry.activation_metrics.top_energy_share * 100, 1, "%");
+    }
+  }
+  if (layerEntry?.attention_metrics) {
+    const attentionValues = elements.attentionGrid.querySelectorAll(".metric-value");
+    if (attentionValues[2]) {
+      attentionValues[2].textContent = formatMetricValue(layerEntry.attention_metrics.sink_head_ratio * 100, 1, "%");
+    }
+  }
+  renderDepthList(elements.depthList, state.layerAnalysis || [], layerIndex);
+}
+
+async function loadLayerAnalysis(requestToken) {
+  try {
+    const payload = await fetchJson("/api/layer-analysis", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model_id: elements.modelSelect.value,
+        prompt: elements.promptInput.value,
+        include_special_tokens: elements.toggleSpecial.checked,
+      }),
+    });
+
+    if (requestToken !== state.analysisRequestToken || !state.payload) {
+      return;
+    }
+    state.layerAnalysis = payload.layer_analysis || [];
+    renderAnalysisPanels();
+  } catch (_error) {
+    if (requestToken !== state.analysisRequestToken) {
+      return;
+    }
+    state.layerAnalysis = [];
+    renderAnalysisPanels();
+  }
 }
 
 function updateVisibleSteps(preferredStepIndex = null) {
@@ -286,7 +457,7 @@ function updateVisibleSteps(preferredStepIndex = null) {
     elements.playButton.disabled = true;
     elements.stepLabel.textContent = "Step: Select at least one stage family";
     elements.stepCounter.textContent = "0 / 0";
-    renderLogitPanels();
+    renderAnalysisPanels();
     render();
     return;
   }
@@ -298,7 +469,7 @@ function updateVisibleSteps(preferredStepIndex = null) {
   elements.stepSlider.max = String(Math.max(state.visibleTextures.length - 1, 0));
   elements.stepSlider.value = String(state.visibleIndex);
   updateStepLabel();
-  renderLogitPanels();
+  renderAnalysisPanels();
   render();
 }
 
@@ -349,7 +520,7 @@ function setVisibleStep(index) {
   state.visibleIndex = Math.max(0, Math.min(index, state.visibleTextures.length - 1));
   elements.stepSlider.value = String(state.visibleIndex);
   updateStepLabel();
-  renderLogitPanels();
+  renderAnalysisPanels();
   render();
 }
 
@@ -629,6 +800,8 @@ async function analyzePrompt() {
   stopPlayback();
   setStatus("Analyzing", "busy");
   elements.analyzeButton.disabled = true;
+  const requestToken = state.analysisRequestToken + 1;
+  state.analysisRequestToken = requestToken;
 
   try {
     const payload = await fetchJson("/api/analyze", {
@@ -642,22 +815,25 @@ async function analyzePrompt() {
     });
 
     state.payload = payload;
+    state.layerAnalysis = [];
     state.allTextures = payload.steps.map(createTexture);
     renderTokenStrip();
-    renderLogitPanels();
+    renderAnalysisPanels();
     elements.analysisNote.textContent = `${payload.tokens.length} visible tokens across ${payload.steps.length} stage steps${elements.toggleSpecial.checked ? ", including special tokens" : ""}.`;
     resizeCanvas();
     updateVisibleSteps();
     setStatus("Ready", "ready");
+    loadLayerAnalysis(requestToken);
   } catch (error) {
     setStatus("Error", "busy");
     elements.stepLabel.textContent = `Step: ${error.message}`;
     elements.stepCounter.textContent = "0 / 0";
     elements.analysisNote.textContent = "";
     state.payload = null;
+    state.layerAnalysis = [];
     state.allTextures = [];
     state.visibleTextures = [];
-    renderLogitPanels();
+    renderAnalysisPanels();
     render();
   } finally {
     elements.analyzeButton.disabled = false;
@@ -700,12 +876,12 @@ elements.modelSelect.addEventListener("change", () => {
 loadModels()
   .then(() => {
     setStatus("Idle", "idle");
-    renderLogitPanels();
+    renderAnalysisPanels();
     resizeCanvas();
   })
   .catch((error) => {
     setStatus("Error", "busy");
     elements.modelMeta.textContent = error.message;
-    renderLogitPanels();
+    renderAnalysisPanels();
     resizeCanvas();
   });

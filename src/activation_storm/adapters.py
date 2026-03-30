@@ -54,7 +54,12 @@ class ModelAdapter:
     def architecture_text(self) -> str:
         raise NotImplementedError
 
-    def analyze_prompt(self, prompt: str, include_special_tokens: bool = False) -> FlowAnalysisResult:
+    def analyze_prompt(
+        self,
+        prompt: str,
+        include_special_tokens: bool = False,
+        include_layer_analysis: bool = True,
+    ) -> FlowAnalysisResult:
         raise NotImplementedError
 
     def release(self) -> None:

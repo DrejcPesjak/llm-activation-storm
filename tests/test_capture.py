@@ -5,6 +5,14 @@ import unittest
 
 import torch
 
+from activation_storm.analysis_metrics import (
+    compute_activation_kurtosis,
+    compute_attention_entropy_metrics,
+    compute_logit_shift_rms,
+    compute_participation_ratio,
+    compute_target_rms,
+    compute_top_energy_share,
+)
 from activation_storm.capture import (
     apply_logit_soft_cap,
     build_flow_steps,
@@ -50,6 +58,34 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual([entry.token_id for entry in top_tokens], [1, 3, 2])
         self.assertEqual(top_tokens[0].token, "tok-1")
         self.assertEqual(top_tokens[1].logit, 2.4)
+
+    def test_tensor_rms_and_logit_shift_rms(self):
+        values = torch.tensor([3.0, 4.0], dtype=torch.float32)
+        self.assertAlmostEqual(compute_target_rms(values), 3.535533, places=5)
+        self.assertAlmostEqual(
+            compute_logit_shift_rms(torch.tensor([3.0, 5.0]), torch.tensor([1.0, 1.0])),
+            3.162277,
+            places=5,
+        )
+
+    def test_activation_distribution_metrics(self):
+        values = torch.tensor([[1.0, 2.0], [3.0, 10.0]], dtype=torch.float32)
+        self.assertGreater(compute_activation_kurtosis(values), 1.0)
+        self.assertGreater(compute_top_energy_share(values), 0.5)
+        self.assertGreaterEqual(compute_participation_ratio(values), 1.0)
+
+    def test_attention_entropy_metrics_capture_sink_behavior(self):
+        attention_row = torch.tensor(
+            [
+                [0.8, 0.2],
+                [0.5, 0.5],
+            ],
+            dtype=torch.float32,
+        )
+        mean_entropy, sink_mass, sink_head_ratio = compute_attention_entropy_metrics(attention_row)
+        self.assertGreater(mean_entropy, 0.0)
+        self.assertAlmostEqual(sink_mass, 0.65, places=5)
+        self.assertAlmostEqual(sink_head_ratio, 1.0, places=5)
 
     def test_build_flow_steps_orders_embedding_then_layer_sequence(self):
         sink = {

@@ -5,10 +5,22 @@ import unittest
 from pathlib import Path
 
 from activation_storm.api import ActivationStormApp
-from activation_storm.types import FlowAnalysisResult, FlowStep, LayerTopTokens, LogitToken, ModelInfo
+from activation_storm.types import (
+    ActivationMetrics,
+    AttentionMetrics,
+    ContributionMetrics,
+    FlowAnalysisResult,
+    FlowStep,
+    LayerAnalysis,
+    LogitToken,
+    ModelInfo,
+)
 
 
 class FakeAdapter:
+    def __init__(self):
+        self.include_layer_analysis_calls: list[bool] = []
+
     def architecture_text(self) -> str:
         return "FakeModel(\n  (layers): FakeStack()\n)"
 
@@ -23,9 +35,36 @@ class FakeAdapter:
             default_prompt='The capital of France is',
         )
 
-    def analyze_prompt(self, prompt: str, include_special_tokens: bool = False) -> FlowAnalysisResult:
+    def analyze_prompt(
+        self,
+        prompt: str,
+        include_special_tokens: bool = False,
+        include_layer_analysis: bool = True,
+    ) -> FlowAnalysisResult:
         if not prompt.strip():
             raise ValueError('Prompt must not be empty.')
+        self.include_layer_analysis_calls.append(include_layer_analysis)
+        layer_analysis = [
+            LayerAnalysis(
+                layer_index=0,
+                top_tokens=[
+                    LogitToken(token_id=1, token='world', logit=3.5),
+                    LogitToken(token_id=2, token='there', logit=2.25),
+                ],
+                activation_metrics=ActivationMetrics(1.5, 2.5, 0.33, 1.2),
+                attention_metrics=AttentionMetrics(0.75, 0.2, 0.5),
+                contribution_metrics=ContributionMetrics(1.1),
+            ),
+            LayerAnalysis(
+                layer_index=1,
+                top_tokens=[
+                    LogitToken(token_id=3, token='again', logit=1.75),
+                ],
+                activation_metrics=ActivationMetrics(1.9, 2.9, 0.4, 1.4),
+                attention_metrics=AttentionMetrics(0.55, 0.15, 0.25),
+                contribution_metrics=ContributionMetrics(0.8),
+            ),
+        ] if include_layer_analysis else []
         return FlowAnalysisResult(
             model=self.model_info(),
             tokens=['hello'],
@@ -57,21 +96,7 @@ class FakeAdapter:
             target_position=1,
             target_token_id=42,
             target_token='hello',
-            layer_top_tokens=[
-                LayerTopTokens(
-                    layer_index=0,
-                    top_tokens=[
-                        LogitToken(token_id=1, token='world', logit=3.5),
-                        LogitToken(token_id=2, token='there', logit=2.25),
-                    ],
-                ),
-                LayerTopTokens(
-                    layer_index=1,
-                    top_tokens=[
-                        LogitToken(token_id=3, token='again', logit=1.75),
-                    ],
-                ),
-            ],
+            layer_analysis=layer_analysis,
         )
 
 
@@ -80,7 +105,8 @@ class ApiTests(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         static_dir = Path(self.tempdir.name)
         (static_dir / 'index.html').write_text('<h1>ok</h1>', encoding='utf-8')
-        self.app = ActivationStormApp(static_dir=static_dir, registry={'fake': FakeAdapter()})
+        self.fake_adapter = FakeAdapter()
+        self.app = ActivationStormApp(static_dir=static_dir, registry={'fake': self.fake_adapter})
 
     def tearDown(self):
         self.tempdir.cleanup()
@@ -102,8 +128,16 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload['steps'][0]['rows'], 1)
         self.assertEqual(payload['target_position'], 1)
         self.assertEqual(payload['target_token'], 'hello')
-        self.assertEqual(payload['layer_top_tokens'][0]['top_tokens'][0]['token'], 'world')
-        self.assertEqual(payload['layer_top_tokens'][1]['layer_index'], 1)
+        self.assertEqual(payload['layer_analysis'], [])
+        self.assertEqual(self.fake_adapter.include_layer_analysis_calls[-1], False)
+
+    def test_layer_analysis_payload_returns_analysis_only(self):
+        payload = self.app.layer_analysis_payload({'model_id': 'fake', 'prompt': 'hello'})
+        self.assertEqual(payload['target_token'], 'hello')
+        self.assertEqual(payload['layer_analysis'][0]['top_tokens'][0]['token'], 'world')
+        self.assertEqual(payload['layer_analysis'][1]['layer_index'], 1)
+        self.assertEqual(payload['layer_analysis'][0]['activation_metrics']['kurtosis'], 2.5)
+        self.assertEqual(self.fake_adapter.include_layer_analysis_calls[-1], True)
 
     def test_architecture_payload_returns_model_printout(self):
         payload = self.app.architecture_payload('fake')
