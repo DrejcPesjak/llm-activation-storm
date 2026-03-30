@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import sys
 import traceback
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -9,12 +10,14 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .adapters import build_registry
+from .logger import LoggerConfig, RunLogger
 
 
 class ActivationStormApp:
-    def __init__(self, static_dir: Path, registry: dict | None = None) -> None:
+    def __init__(self, static_dir: Path, registry: dict | None = None, logger: RunLogger | None = None) -> None:
         self.static_dir = static_dir
         self.registry = registry if registry is not None else build_registry()
+        self.logger = logger
 
     def models_payload(self) -> dict:
         models = [adapter.model_info().to_dict() for adapter in self.registry.values()]
@@ -47,12 +50,18 @@ class ActivationStormApp:
             prompt,
             include_special_tokens=include_special_tokens,
             include_layer_analysis=True,
-        ).to_dict()
+        )
+        self._log_metrics(
+            prompt=prompt,
+            include_special_tokens=include_special_tokens,
+            result=result,
+        )
+        result_dict = result.to_dict()
         return {
-            "target_position": result["target_position"],
-            "target_token_id": result["target_token_id"],
-            "target_token": result["target_token"],
-            "layer_analysis": result["layer_analysis"],
+            "target_position": result_dict["target_position"],
+            "target_token_id": result_dict["target_token_id"],
+            "target_token": result_dict["target_token"],
+            "layer_analysis": result_dict["layer_analysis"],
         }
 
     def architecture_payload(self, model_id: str) -> dict:
@@ -65,6 +74,24 @@ class ActivationStormApp:
             "model": adapter.model_info().to_dict(),
             "architecture": adapter.architecture_text(),
         }
+
+    def _log_metrics(
+        self,
+        *,
+        prompt: str,
+        include_special_tokens: bool,
+        result,
+    ) -> None:
+        if self.logger is None:
+            return
+        try:
+            self.logger.log_metrics(
+                prompt=prompt,
+                include_special_tokens=include_special_tokens,
+                result=result,
+            )
+        except Exception:
+            print("Metric logging failed.", file=sys.stderr)
 
 
 class ActivationStormHandler(BaseHTTPRequestHandler):
@@ -153,9 +180,17 @@ class ActivationStormServer(ThreadingHTTPServer):
         self.app = app
 
 
-def run_server(host: str = "127.0.0.1", port: int = 8000) -> None:
+def run_server(
+    host: str = "127.0.0.1",
+    port: int = 8000,
+    log_dir: str | Path = "logs",
+    enable_logging: bool = True,
+) -> None:
     static_dir = Path(__file__).with_name("static")
-    app = ActivationStormApp(static_dir=static_dir)
+    logger = None
+    if enable_logging:
+        logger = RunLogger(LoggerConfig(log_dir=Path(log_dir), enabled=True))
+    app = ActivationStormApp(static_dir=static_dir, logger=logger)
     server = ActivationStormServer((host, port), ActivationStormHandler, app)
     print(f"Activation Storm running at http://{host}:{port}")
     try:

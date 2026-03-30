@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from activation_storm.api import ActivationStormApp
+from activation_storm.logger import LoggerConfig, RunLogger
 from activation_storm.types import (
     ActivationMetrics,
     AttentionMetrics,
@@ -100,10 +102,17 @@ class FakeAdapter:
         )
 
 
+class BrokenLogger:
+    def log_metrics(self, **_kwargs):
+        raise RuntimeError("log write failed")
+
+
 class ApiTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
-        static_dir = Path(self.tempdir.name)
+        self.static_dir = Path(self.tempdir.name) / 'static'
+        self.static_dir.mkdir()
+        static_dir = self.static_dir
         (static_dir / 'index.html').write_text('<h1>ok</h1>', encoding='utf-8')
         self.fake_adapter = FakeAdapter()
         self.app = ActivationStormApp(static_dir=static_dir, registry={'fake': self.fake_adapter})
@@ -130,6 +139,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload['target_token'], 'hello')
         self.assertEqual(payload['layer_analysis'], [])
         self.assertEqual(self.fake_adapter.include_layer_analysis_calls[-1], False)
+        self.assertEqual(list((Path(self.tempdir.name) / 'logs').glob('*')), [])
 
     def test_layer_analysis_payload_returns_analysis_only(self):
         payload = self.app.layer_analysis_payload({'model_id': 'fake', 'prompt': 'hello'})
@@ -138,6 +148,42 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload['layer_analysis'][1]['layer_index'], 1)
         self.assertEqual(payload['layer_analysis'][0]['activation_metrics']['kurtosis'], 2.5)
         self.assertEqual(self.fake_adapter.include_layer_analysis_calls[-1], True)
+
+    def test_layer_analysis_payload_logs_metrics_record(self):
+        log_dir = Path(self.tempdir.name) / 'logs'
+        logger = RunLogger(LoggerConfig(log_dir=log_dir, enabled=True), session_stamp="2026-03-30_12-00")
+        app = ActivationStormApp(static_dir=self.static_dir, registry={'fake': self.fake_adapter}, logger=logger)
+
+        payload = app.layer_analysis_payload({'model_id': 'fake', 'prompt': 'hello', 'include_special_tokens': True})
+
+        self.assertEqual(payload['target_token'], 'hello')
+        files = list(log_dir.glob('metrics_2026-03-30_12-00.jsonl'))
+        self.assertEqual(len(files), 1)
+        lines = files[0].read_text(encoding='utf-8').strip().splitlines()
+        self.assertEqual(len(lines), 1)
+        record = json.loads(lines[0])
+        self.assertEqual(record['log_type'], 'metrics')
+        self.assertEqual(record['model']['id'], 'fake')
+        self.assertEqual(record['request']['prompt'], 'hello')
+        self.assertTrue(record['request']['include_special_tokens'])
+        self.assertEqual(record['context']['tokens'], ['hello'])
+        self.assertEqual(record['metrics']['layer_analysis'][0]['layer_index'], 0)
+
+    def test_analyze_does_not_log_metrics_record(self):
+        log_dir = Path(self.tempdir.name) / 'logs'
+        logger = RunLogger(LoggerConfig(log_dir=log_dir, enabled=True), session_stamp="2026-03-30_12-00")
+        app = ActivationStormApp(static_dir=self.static_dir, registry={'fake': self.fake_adapter}, logger=logger)
+
+        app.analyze({'model_id': 'fake', 'prompt': 'hello'})
+
+        self.assertEqual(list(log_dir.glob('*.jsonl')), [])
+
+    def test_logging_failure_does_not_break_layer_analysis(self):
+        app = ActivationStormApp(static_dir=self.static_dir, registry={'fake': self.fake_adapter}, logger=BrokenLogger())
+
+        payload = app.layer_analysis_payload({'model_id': 'fake', 'prompt': 'hello'})
+
+        self.assertEqual(payload['target_token'], 'hello')
 
     def test_architecture_payload_returns_model_printout(self):
         payload = self.app.architecture_payload('fake')
