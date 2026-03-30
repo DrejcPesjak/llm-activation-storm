@@ -88,18 +88,21 @@ class Gemma3Adapter(ModelAdapter):
             tokenized = self._tokenize_prompt(clean_prompt)
             input_ids = tokenized["input_ids"]
             attention_mask = tokenized["attention_mask"]
-            positions, token_limit_applied = self._visible_positions(
+            visible_positions, token_limit_applied = self._visible_positions(
                 prompt=clean_prompt,
                 input_ids=input_ids[0],
                 attention_mask=attention_mask[0],
-                include_special_tokens=include_special_tokens,
+                include_special_tokens=False,
             )
-            if not positions:
+            if not visible_positions:
                 raise ValueError("Prompt did not produce any visible tokens.")
+            sequence_length = int(attention_mask[0].sum().item())
+            full_positions = list(range(sequence_length))
+            visible_position_set = set(visible_positions)
 
-            visible_ids = input_ids[0, positions].detach().cpu().tolist()
-            tokens = [self._display_token(token_id) for token_id in visible_ids]
-            positions_tensor = torch.tensor(positions, dtype=torch.long)
+            token_ids = input_ids[0, :sequence_length].detach().cpu().tolist()
+            tokens = [self._display_token(token_id) for token_id in token_ids]
+            positions_tensor = torch.tensor(full_positions, dtype=torch.long)
             sink: dict[int, dict[str, torch.Tensor]] = {}
 
             handles = build_stage_hooks(self._embedding_module(), self._layers(), sink)
@@ -128,7 +131,7 @@ class Gemma3Adapter(ModelAdapter):
                 layer_analysis = self._build_layer_analysis(
                     sink=sink,
                     attentions=outputs.attentions,
-                    positions=positions,
+                    positions=full_positions,
                     target_position=target_position,
                 )
 
@@ -139,6 +142,7 @@ class Gemma3Adapter(ModelAdapter):
             token_limit=len(tokens),
             token_limit_applied=token_limit_applied,
             steps=steps,
+            visible_token_mask=[index in visible_position_set for index in range(len(token_ids))],
             target_position=target_position,
             target_token_id=target_token_id,
             target_token=self._display_token(target_token_id),

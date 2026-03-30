@@ -145,6 +145,36 @@ function base64ToBytes(base64) {
   return bytes;
 }
 
+function visibleTokenMask() {
+  if (!state.payload?.tokens?.length) {
+    return [];
+  }
+  const mask = state.payload.visible_token_mask;
+  if (Array.isArray(mask) && mask.length === state.payload.tokens.length) {
+    return mask;
+  }
+  return state.payload.tokens.map(() => true);
+}
+
+function displayRowIndices() {
+  if (!state.payload?.tokens?.length) {
+    return [];
+  }
+  if (elements.toggleSpecial.checked) {
+    return state.payload.tokens.map((_token, index) => index);
+  }
+  const mask = visibleTokenMask();
+  return mask.flatMap((isVisible, index) => (isVisible ? [index] : []));
+}
+
+function displayTokens() {
+  if (!state.payload?.tokens?.length) {
+    return [];
+  }
+  const rowIndices = displayRowIndices();
+  return rowIndices.map((index) => state.payload.tokens[index]);
+}
+
 function lerpColor(base, magnitude) {
   const eased = Math.pow(magnitude, 0.75);
   const floor = 8;
@@ -155,8 +185,7 @@ function lerpColor(base, magnitude) {
   ];
 }
 
-function createTexture(step) {
-  const bytes = base64ToBytes(step.encoded_field);
+function createTextureCanvas(step, bytes) {
   const canvas = document.createElement("canvas");
   canvas.width = step.cols;
   canvas.height = step.rows;
@@ -184,7 +213,30 @@ function createTexture(step) {
   }
 
   context.putImageData(image, 0, 0);
-  return { ...step, canvas, hotspots };
+  return { canvas, hotspots };
+}
+
+function createTexture(step) {
+  const bytes = base64ToBytes(step.encoded_field);
+  const { canvas, hotspots } = createTextureCanvas(step, bytes);
+  return { ...step, canvas, hotspots, sourceBytes: bytes, fullRows: step.rows };
+}
+
+function filterTextureRows(step, rowIndices) {
+  if (rowIndices.length === step.fullRows) {
+    return step;
+  }
+
+  const filteredBytes = new Uint8Array(rowIndices.length * step.cols);
+  rowIndices.forEach((rowIndex, filteredRowIndex) => {
+    const sourceStart = rowIndex * step.cols;
+    const targetStart = filteredRowIndex * step.cols;
+    filteredBytes.set(step.sourceBytes.subarray(sourceStart, sourceStart + step.cols), targetStart);
+  });
+
+  const filteredStep = { ...step, rows: rowIndices.length };
+  const { canvas, hotspots } = createTextureCanvas(filteredStep, filteredBytes);
+  return { ...filteredStep, canvas, hotspots };
 }
 
 function desiredCanvasHeight() {
@@ -192,7 +244,7 @@ function desiredCanvasHeight() {
     return 760;
   }
 
-  const tokenCount = Math.max(state.payload.tokens.length, 1);
+  const tokenCount = Math.max(displayTokens().length, 1);
   return CANVAS_TOP_PADDING + OVERVIEW_HEIGHT + DETAIL_TOP_GAP + (tokenCount * TOKEN_ROW_HEIGHT) + DETAIL_META_SPACE + CANVAS_BOTTOM_PADDING;
 }
 
@@ -214,7 +266,7 @@ function renderTokenStrip() {
     return;
   }
 
-  state.payload.tokens.forEach((token) => {
+  displayTokens().forEach((token) => {
     const chip = document.createElement("span");
     chip.className = "token-chip";
     chip.textContent = token === " " ? "␠" : token;
@@ -426,7 +478,7 @@ async function loadLayerAnalysis(requestToken) {
       body: JSON.stringify({
         model_id: elements.modelSelect.value,
         prompt: elements.promptInput.value,
-        include_special_tokens: elements.toggleSpecial.checked,
+        include_special_tokens: true,
       }),
     });
 
@@ -448,8 +500,11 @@ function updateVisibleSteps(preferredStepIndex = null) {
   const families = selectedFamilies();
   const active = activeTexture();
   const keepStepIndex = preferredStepIndex ?? (active ? active.step_index : null);
+  const rowIndices = displayRowIndices();
 
-  state.visibleTextures = state.allTextures.filter((step) => families[familyForStep(step)]);
+  state.visibleTextures = state.allTextures
+    .filter((step) => families[familyForStep(step)])
+    .map((step) => filterTextureRows(step, rowIndices));
 
   if (!state.visibleTextures.length) {
     state.visibleIndex = 0;
@@ -458,7 +513,7 @@ function updateVisibleSteps(preferredStepIndex = null) {
     elements.stepLabel.textContent = "Step: Select at least one stage family";
     elements.stepCounter.textContent = "0 / 0";
     renderAnalysisPanels();
-    render();
+    resizeCanvas();
     return;
   }
 
@@ -470,7 +525,7 @@ function updateVisibleSteps(preferredStepIndex = null) {
   elements.stepSlider.value = String(state.visibleIndex);
   updateStepLabel();
   renderAnalysisPanels();
-  render();
+  resizeCanvas();
 }
 
 function updateStepLabel() {
@@ -737,13 +792,14 @@ function drawDetail(context, detail) {
   context.fillStyle = "rgba(169, 207, 241, 0.72)";
   context.fillText(`${step.rows} tokens × ${step.cols} hidden dims`, detail.x, detail.y + detail.height + 18);
 
-  const tokenLabelCount = state.payload.tokens.length;
+  const tokens = displayTokens();
+  const tokenLabelCount = tokens.length;
   const fontSize = 12;
   context.font = `${fontSize}px IBM Plex Sans`;
   for (let index = 0; index < tokenLabelCount; index += 1) {
     const y = detail.y + ((index + 0.5) * TOKEN_ROW_HEIGHT);
     context.fillStyle = "rgba(212, 233, 255, 0.72)";
-    context.fillText(state.payload.tokens[index], detail.x - 116, y + 4);
+    context.fillText(tokens[index], detail.x - 116, y + 4);
   }
   context.restore();
 }
@@ -763,7 +819,7 @@ function render() {
     return;
   }
 
-  const tokenCount = state.payload.tokens.length;
+  const tokenCount = displayTokens().length;
   const detailHeight = Math.max(tokenCount, 1) * TOKEN_ROW_HEIGHT;
   const overview = {
     x: 24,
@@ -810,7 +866,7 @@ async function analyzePrompt() {
       body: JSON.stringify({
         model_id: elements.modelSelect.value,
         prompt: elements.promptInput.value,
-        include_special_tokens: elements.toggleSpecial.checked,
+        include_special_tokens: true,
       }),
     });
 
@@ -819,7 +875,10 @@ async function analyzePrompt() {
     state.allTextures = payload.steps.map(createTexture);
     renderTokenStrip();
     renderAnalysisPanels();
-    elements.analysisNote.textContent = `${payload.tokens.length} visible tokens across ${payload.steps.length} stage steps${elements.toggleSpecial.checked ? ", including special tokens" : ""}.`;
+    const visibleCount = visibleTokenMask().filter(Boolean).length;
+    elements.analysisNote.textContent = elements.toggleSpecial.checked
+      ? `${payload.tokens.length} total tokens across ${payload.steps.length} stage steps, including special tokens.`
+      : `${visibleCount} visible prompt tokens shown out of ${payload.tokens.length} total tokens across ${payload.steps.length} stage steps.`;
     resizeCanvas();
     updateVisibleSteps();
     setStatus("Ready", "ready");
@@ -861,7 +920,13 @@ elements.stepSlider.addEventListener("input", (event) => {
 elements.toggleSpecial.addEventListener("change", () => {
   stopPlayback();
   if (state.payload) {
-    analyzePrompt();
+    renderTokenStrip();
+    const active = activeTexture();
+    updateVisibleSteps(active ? active.step_index : null);
+    const visibleCount = visibleTokenMask().filter(Boolean).length;
+    elements.analysisNote.textContent = elements.toggleSpecial.checked
+      ? `${state.payload.tokens.length} total tokens across ${state.payload.steps.length} stage steps, including special tokens.`
+      : `${visibleCount} visible prompt tokens shown out of ${state.payload.tokens.length} total tokens across ${state.payload.steps.length} stage steps.`;
   }
 });
 window.addEventListener("resize", resizeCanvas);

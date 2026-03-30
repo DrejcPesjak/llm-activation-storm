@@ -98,14 +98,16 @@ class TransformerLensAdapter(ModelAdapter):
                 raise RuntimeError("Expected a single prompt batch.")
 
             token_ids = tokens[0].detach().cpu().tolist()
-            positions = self._visible_positions(
+            visible_positions = self._visible_positions(
                 rendered_prompt=rendered_prompt,
                 prompt=clean_prompt,
                 token_ids=token_ids,
-                include_special_tokens=include_special_tokens,
+                include_special_tokens=False,
             )
-            if not positions:
+            if not visible_positions:
                 raise ValueError("Prompt did not produce any visible tokens.")
+            full_positions = list(range(len(token_ids)))
+            visible_position_set = set(visible_positions)
 
             cache_names = self._cache_names(include_layer_analysis=include_layer_analysis)
             with torch.inference_mode():
@@ -116,27 +118,27 @@ class TransformerLensAdapter(ModelAdapter):
                     return_cache_object=False,
                 )
 
-            visible_ids = [token_ids[index] for index in positions]
-            visible_tokens = [self._display_token(token_id) for token_id in visible_ids]
-            steps = self._build_steps_from_cache(cache=cache, positions=positions)
+            tokens_display = [self._display_token(token_id) for token_id in token_ids]
+            steps = self._build_steps_from_cache(cache=cache, positions=full_positions)
             target_position = len(token_ids) - 1
             target_token_id = token_ids[target_position]
             layer_analysis = []
             if include_layer_analysis:
                 layer_analysis = self._build_layer_analysis(
                     cache=cache,
-                    positions=positions,
+                    positions=full_positions,
                     target_position=target_position,
                 )
 
         model_info = self.model_info()
         return FlowAnalysisResult(
             model=model_info,
-            tokens=visible_tokens,
+            tokens=tokens_display,
             hidden_width=model_info.layer_width,
-            token_limit=len(visible_tokens),
+            token_limit=len(tokens_display),
             token_limit_applied=False,
             steps=steps,
+            visible_token_mask=[index in visible_position_set for index in range(len(token_ids))],
             target_position=target_position,
             target_token_id=target_token_id,
             target_token=self._display_token(target_token_id),

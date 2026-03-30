@@ -97,6 +97,7 @@ class FlowAnalysisResult:
     token_limit: int
     token_limit_applied: bool
     steps: list[FlowStep]
+    visible_token_mask: list[bool] = field(default_factory=list)
     target_position: int = -1
     target_token_id: int | None = None
     target_token: str = ""
@@ -106,6 +107,7 @@ class FlowAnalysisResult:
         return {
             "model": self.model.to_dict(),
             "tokens": self.tokens,
+            "visible_token_mask": self.visible_token_mask,
             "hidden_width": self.hidden_width,
             "token_limit": self.token_limit,
             "token_limit_applied": self.token_limit_applied,
