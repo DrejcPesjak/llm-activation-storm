@@ -386,8 +386,8 @@ function renderAnalysisPanels() {
     elements.metricsGrid,
     layerEntry?.activation_metrics,
     [
-      { key: "target_rms", label: "Target RMS", decimals: 2, description: "Overall size of the selected token activation at this layer." },
-      { key: "kurtosis", label: "Kurtosis", decimals: 2, description: "How peaky the activation distribution is, versus being spread more evenly." },
+      { key: "layer_variance", label: "Layer Variance", decimals: 2, description: "How much the layer residual values vary overall, which is a simple depth-growth proxy." },
+      { key: "kurtosis", label: "Kurtosis", decimals: 2, description: "How uneven the channel magnitudes are, with higher values meaning stronger outlier channels." },
       { key: "top_energy_share", label: "Top 1% Energy", decimals: 1, description: "How much of the layer energy sits in the strongest 1% of channels." },
       { key: "participation_ratio", label: "Participation", decimals: 2, description: "Roughly how many dimensions are carrying meaningful signal here." },
     ],
@@ -397,9 +397,9 @@ function renderAnalysisPanels() {
     elements.attentionGrid,
     layerEntry?.attention_metrics,
     [
-      { key: "mean_entropy", label: "Mean Entropy", decimals: 2, description: "How spread out each head is over source tokens for the final position." },
-      { key: "sink_mass", label: "Sink Mass", decimals: 2, description: "How much attention flows into the first token, a common sink location." },
-      { key: "sink_head_ratio", label: "Sink Heads", decimals: 1, description: "Percent of heads that treat the first token as their main sink target." },
+      { key: "mean_entropy", label: "Mean Entropy", decimals: 2, description: "How spread out attention is across source tokens, averaged over heads and query positions." },
+      { key: "sink_mass", label: "Sink Mass", decimals: 2, description: "How much attention flows into the first token on average, a common sink location." },
+      { key: "sink_head_ratio", label: "Sink Heads", decimals: 1, description: "Percent of attention rows whose top target is the first token." },
     ],
     state.layerAnalysis.length ? "No attention metrics for the current layer." : "Computing attention metrics…",
   );

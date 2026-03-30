@@ -44,7 +44,7 @@ class LogitToken:
 
 @dataclass(frozen=True)
 class ActivationMetrics:
-    target_rms: float
+    layer_variance: float
     kurtosis: float
     top_energy_share: float
     participation_ratio: float

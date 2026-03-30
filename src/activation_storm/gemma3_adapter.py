@@ -11,7 +11,7 @@ from .analysis_metrics import (
     compute_attention_entropy_metrics,
     compute_logit_shift_rms,
     compute_participation_ratio,
-    compute_target_rms,
+    compute_tensor_variance,
     compute_top_energy_share,
 )
 from .adapters import DEFAULT_PROMPTS, ModelAdapter, ModelResidencyManager
@@ -259,7 +259,6 @@ class Gemma3Adapter(ModelAdapter):
             mean_entropy, sink_mass, sink_head_ratio = self._attention_metrics_for_layer(
                 attentions=attentions,
                 layer_index=layer_index,
-                target_position=target_position,
             )
 
             layer_analysis.append(
@@ -267,7 +266,7 @@ class Gemma3Adapter(ModelAdapter):
                     layer_index=layer_index,
                     top_tokens=self._top_tokens_from_logits(current_logits),
                     activation_metrics=ActivationMetrics(
-                        target_rms=round(compute_target_rms(target_hidden.detach().float().cpu()), 6),
+                        layer_variance=round(compute_tensor_variance(resid_field), 6),
                         kurtosis=round(compute_activation_kurtosis(resid_field), 6),
                         top_energy_share=round(compute_top_energy_share(resid_field), 6),
                         participation_ratio=round(compute_participation_ratio(resid_field), 6),
@@ -294,7 +293,6 @@ class Gemma3Adapter(ModelAdapter):
         self,
         attentions,
         layer_index: int,
-        target_position: int,
     ) -> tuple[float, float, float]:
         if attentions is None or len(attentions) <= layer_index:
             return float("nan"), float("nan"), float("nan")
@@ -303,7 +301,7 @@ class Gemma3Adapter(ModelAdapter):
         if layer_attention is None:
             return float("nan"), float("nan"), float("nan")
 
-        return compute_attention_entropy_metrics(layer_attention[0, :, target_position, :])
+        return compute_attention_entropy_metrics(layer_attention[0])
 
     def _project_hidden_to_logits(self, hidden: torch.Tensor) -> torch.Tensor:
         lm_head = self._lm_head()

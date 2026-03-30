@@ -12,7 +12,7 @@ from .analysis_metrics import (
     compute_attention_entropy_metrics,
     compute_logit_shift_rms,
     compute_participation_ratio,
-    compute_target_rms,
+    compute_tensor_variance,
     compute_top_energy_share,
 )
 from .adapters import DEFAULT_PROMPTS, ModelAdapter, ModelResidencyManager, TLModelSpec
@@ -318,16 +318,14 @@ class TransformerLensAdapter(ModelAdapter):
             pattern_tensor = cache.get(pattern_hook_name)
             if pattern_tensor is None:
                 raise RuntimeError(f"Missing {pattern_hook_name} in cache for {self.model_id}")
-            mean_entropy, sink_mass, sink_head_ratio = compute_attention_entropy_metrics(
-                pattern_tensor[0, :, target_position, :]
-            )
+            mean_entropy, sink_mass, sink_head_ratio = compute_attention_entropy_metrics(pattern_tensor[0])
 
             layer_analysis.append(
                 LayerAnalysis(
                     layer_index=layer_index,
                     top_tokens=self._top_tokens_from_logits(current_logits),
                     activation_metrics=ActivationMetrics(
-                        target_rms=round(compute_target_rms(target_hidden.detach().float().cpu()), 6),
+                        layer_variance=round(compute_tensor_variance(resid_field), 6),
                         kurtosis=round(compute_activation_kurtosis(resid_field), 6),
                         top_energy_share=round(compute_top_energy_share(resid_field), 6),
                         participation_ratio=round(compute_participation_ratio(resid_field), 6),

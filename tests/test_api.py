@@ -51,7 +51,7 @@ class FakeAdapter:
                     LogitToken(token_id=1, token='world', logit=3.5),
                     LogitToken(token_id=2, token='there', logit=2.25),
                 ],
-                activation_metrics=ActivationMetrics(1.5, 2.5, 0.33, 1.2),
+                activation_metrics=ActivationMetrics(layer_variance=1.5, kurtosis=2.5, top_energy_share=0.33, participation_ratio=1.2),
                 attention_metrics=AttentionMetrics(0.75, 0.2, 0.5),
                 contribution_metrics=ContributionMetrics(1.1),
             ),
@@ -60,7 +60,7 @@ class FakeAdapter:
                 top_tokens=[
                     LogitToken(token_id=3, token='again', logit=1.75),
                 ],
-                activation_metrics=ActivationMetrics(1.9, 2.9, 0.4, 1.4),
+                activation_metrics=ActivationMetrics(layer_variance=1.9, kurtosis=2.9, top_energy_share=0.4, participation_ratio=1.4),
                 attention_metrics=AttentionMetrics(0.55, 0.15, 0.25),
                 contribution_metrics=ContributionMetrics(0.8),
             ),

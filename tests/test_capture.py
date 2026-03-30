@@ -10,6 +10,7 @@ from activation_storm.analysis_metrics import (
     compute_attention_entropy_metrics,
     compute_logit_shift_rms,
     compute_participation_ratio,
+    compute_tensor_variance,
     compute_target_rms,
     compute_top_energy_share,
 )
@@ -69,23 +70,36 @@ class CaptureTests(unittest.TestCase):
         )
 
     def test_activation_distribution_metrics(self):
-        values = torch.tensor([[1.0, 2.0], [3.0, 10.0]], dtype=torch.float32)
+        values = torch.tensor(
+            [
+                [1.0, 1.0, 1.0, 12.0],
+                [1.0, 2.0, 1.0, 10.0],
+            ],
+            dtype=torch.float32,
+        )
+        self.assertGreater(compute_tensor_variance(values), 0.0)
         self.assertGreater(compute_activation_kurtosis(values), 1.0)
         self.assertGreater(compute_top_energy_share(values), 0.5)
         self.assertGreaterEqual(compute_participation_ratio(values), 1.0)
 
     def test_attention_entropy_metrics_capture_sink_behavior(self):
-        attention_row = torch.tensor(
+        attention_probs = torch.tensor(
             [
-                [0.8, 0.2],
-                [0.5, 0.5],
+                [
+                    [0.8, 0.2],
+                    [0.6, 0.4],
+                ],
+                [
+                    [0.5, 0.5],
+                    [0.3, 0.7],
+                ],
             ],
             dtype=torch.float32,
         )
-        mean_entropy, sink_mass, sink_head_ratio = compute_attention_entropy_metrics(attention_row)
+        mean_entropy, sink_mass, sink_head_ratio = compute_attention_entropy_metrics(attention_probs)
         self.assertGreater(mean_entropy, 0.0)
-        self.assertAlmostEqual(sink_mass, 0.65, places=5)
-        self.assertAlmostEqual(sink_head_ratio, 1.0, places=5)
+        self.assertAlmostEqual(sink_mass, 0.55, places=5)
+        self.assertAlmostEqual(sink_head_ratio, 0.75, places=5)
 
     def test_build_flow_steps_orders_embedding_then_layer_sequence(self):
         sink = {
