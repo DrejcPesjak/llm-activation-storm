@@ -30,6 +30,8 @@ const elements = {
   attentionGrid: document.getElementById("attention-grid"),
   depthMeta: document.getElementById("depth-meta"),
   depthList: document.getElementById("depth-list"),
+  trendMeta: document.getElementById("trend-meta"),
+  metricTrends: document.getElementById("metric-trends"),
   statusPill: document.getElementById("status-pill"),
   modelMeta: document.getElementById("model-meta"),
   canvas: document.getElementById("storm-canvas"),
@@ -395,6 +397,170 @@ function renderDepthList(container, entries, activeLayerIndex) {
   });
 }
 
+function metricTrendSpecs() {
+  return [
+    { group: "activation_metrics", key: "layer_variance", label: "Layer Variance", decimals: 2, description: "Residual variance across layers." },
+    { group: "activation_metrics", key: "kurtosis", label: "Kurtosis", decimals: 2, description: "Channel outlier concentration across layers." },
+    { group: "activation_metrics", key: "top_energy_share", label: "Top 1% Energy", decimals: 1, suffix: "%", multiplier: 100, description: "Top-channel energy share across layers." },
+    { group: "activation_metrics", key: "participation_ratio", label: "Participation", decimals: 2, description: "Effective spread of representation across layers." },
+    { group: "attention_metrics", key: "mean_entropy", label: "Mean Entropy", decimals: 2, description: "Attention spread across layers." },
+    { group: "attention_metrics", key: "sink_mass", label: "Sink Mass", decimals: 2, description: "Mass on the first token across layers." },
+    { group: "attention_metrics", key: "sink_head_ratio", label: "Sink Heads", decimals: 1, suffix: "%", multiplier: 100, description: "Share of sink-seeking rows across layers." },
+    { group: "contribution_metrics", key: "logit_shift_rms", label: "Logit Shift", decimals: 2, description: "Prediction-space movement across layers." },
+  ];
+}
+
+function extractMetricSeries(entries, spec) {
+  return entries.map((entry) => {
+    const value = entry?.[spec.group]?.[spec.key];
+    if (value == null || Number.isNaN(value)) {
+      return Number.NaN;
+    }
+    return spec.multiplier ? value * spec.multiplier : value;
+  });
+}
+
+function paddedMetricRange(values) {
+  const finite = values.filter((value) => Number.isFinite(value));
+  if (!finite.length) {
+    return { min: 0, max: 1 };
+  }
+  const min = Math.min(...finite);
+  const max = Math.max(...finite);
+  if (Math.abs(max - min) < 1e-9) {
+    const pad = Math.max(Math.abs(max) * 0.02, 0.02);
+    return { min: min - pad, max: max + pad };
+  }
+  const pad = (max - min) * 0.08;
+  return { min: min - pad, max: max + pad };
+}
+
+function buildMetricTrendSvg(values, activeLayerIndex) {
+  const width = 320;
+  const height = 108;
+  const left = 12;
+  const right = width - 12;
+  const top = 10;
+  const bottom = height - 18;
+  const plotWidth = Math.max(right - left, 1);
+  const plotHeight = Math.max(bottom - top, 1);
+  const finiteIndices = values.flatMap((value, index) => (Number.isFinite(value) ? [index] : []));
+  if (!finiteIndices.length) {
+    return "";
+  }
+
+  const range = paddedMetricRange(values);
+  const xFor = (index) => {
+    if (values.length <= 1) {
+      return left + plotWidth / 2;
+    }
+    return left + (index / (values.length - 1)) * plotWidth;
+  };
+  const yFor = (value) => {
+    const normalized = (value - range.min) / Math.max(range.max - range.min, 1e-9);
+    return bottom - (normalized * plotHeight);
+  };
+
+  const path = finiteIndices
+    .map((index, offset) => `${offset === 0 ? "M" : "L"} ${xFor(index).toFixed(2)} ${yFor(values[index]).toFixed(2)}`)
+    .join(" ");
+
+  const points = finiteIndices
+    .map((index) => {
+      const isActive = index === activeLayerIndex;
+      const radius = isActive ? 4.5 : 2.5;
+      const klass = isActive ? "trend-point active" : "trend-point";
+      return `<circle class="${klass}" cx="${xFor(index).toFixed(2)}" cy="${yFor(values[index]).toFixed(2)}" r="${radius}"></circle>`;
+    })
+    .join("");
+
+  const activeLine = activeLayerIndex >= 0 && activeLayerIndex < values.length
+    ? `<line class="trend-active-line" x1="${xFor(activeLayerIndex).toFixed(2)}" y1="${top}" x2="${xFor(activeLayerIndex).toFixed(2)}" y2="${bottom}"></line>`
+    : "";
+
+  return `
+    <svg viewBox="0 0 ${width} ${height}" class="metric-trend-svg" aria-hidden="true">
+      <line class="trend-baseline" x1="${left}" y1="${bottom}" x2="${right}" y2="${bottom}"></line>
+      ${activeLine}
+      <path class="trend-line" d="${path}"></path>
+      ${points}
+    </svg>
+  `;
+}
+
+function renderMetricTrends(container, entries, activeLayerIndex) {
+  container.innerHTML = "";
+  if (!entries?.length) {
+    const empty = document.createElement("div");
+    empty.className = "logit-empty";
+    empty.textContent = "Run a prompt to inspect layer-by-layer metric trends.";
+    container.appendChild(empty);
+    return;
+  }
+
+  metricTrendSpecs().forEach((spec) => {
+    const values = extractMetricSeries(entries, spec);
+    const currentValue = activeLayerIndex >= 0 ? values[activeLayerIndex] : Number.NaN;
+    const finiteValues = values.filter((value) => Number.isFinite(value));
+
+    const card = document.createElement("article");
+    card.className = "trend-card";
+
+    const header = document.createElement("div");
+    header.className = "trend-card-header";
+
+    const titleRow = document.createElement("div");
+    titleRow.className = "metric-label-row";
+
+    const title = document.createElement("span");
+    title.className = "metric-label";
+    title.textContent = spec.label;
+
+    const info = document.createElement("span");
+    info.className = "metric-info";
+    info.textContent = "i";
+    info.tabIndex = 0;
+    info.setAttribute("role", "img");
+    info.setAttribute("aria-label", `${spec.label}: ${spec.description}`);
+    info.dataset.tooltip = spec.description;
+
+    titleRow.appendChild(title);
+    titleRow.appendChild(info);
+
+    const current = document.createElement("span");
+    current.className = "trend-current";
+    current.textContent = `L${String(activeLayerIndex + 1).padStart(2, "0")} ${formatMetricValue(currentValue, spec.decimals, spec.suffix || "")}`;
+
+    header.appendChild(titleRow);
+    header.appendChild(current);
+
+    const axis = document.createElement("div");
+    axis.className = "trend-axis";
+
+    const maxLabel = document.createElement("span");
+    maxLabel.textContent = formatMetricValue(Math.max(...finiteValues), spec.decimals, spec.suffix || "");
+
+    const minLabel = document.createElement("span");
+    minLabel.textContent = formatMetricValue(Math.min(...finiteValues), spec.decimals, spec.suffix || "");
+
+    axis.appendChild(maxLabel);
+    axis.appendChild(minLabel);
+
+    const svgWrap = document.createElement("div");
+    svgWrap.className = "trend-chart";
+    svgWrap.innerHTML = buildMetricTrendSvg(values, activeLayerIndex);
+
+    const chartRow = document.createElement("div");
+    chartRow.className = "trend-chart-row";
+    chartRow.appendChild(axis);
+    chartRow.appendChild(svgWrap);
+
+    card.appendChild(header);
+    card.appendChild(chartRow);
+    container.appendChild(card);
+  });
+}
+
 function renderAnalysisPanels() {
   if (!state.payload) {
     elements.logitsMeta.textContent = "Awaiting analysis";
@@ -402,9 +568,11 @@ function renderAnalysisPanels() {
     elements.metricsMeta.textContent = "Current layer";
     elements.attentionMeta.textContent = "Current layer";
     elements.depthMeta.textContent = "Logit shift by layer";
+    elements.trendMeta.textContent = "Layer-by-layer metric shapes";
     renderMetricGrid(elements.metricsGrid, null, [], "Run a prompt to inspect activation metrics.");
     renderMetricGrid(elements.attentionGrid, null, [], "Run a prompt to inspect attention metrics.");
     renderDepthList(elements.depthList, [], -1);
+    renderMetricTrends(elements.metricTrends, [], -1);
     return;
   }
 
@@ -415,6 +583,7 @@ function renderAnalysisPanels() {
     renderMetricGrid(elements.metricsGrid, null, [], "No activation metrics available.");
     renderMetricGrid(elements.attentionGrid, null, [], "No attention metrics available.");
     renderDepthList(elements.depthList, state.layerAnalysis || [], -1);
+    renderMetricTrends(elements.metricTrends, state.layerAnalysis || [], -1);
     return;
   }
 
@@ -434,6 +603,7 @@ function renderAnalysisPanels() {
   elements.metricsMeta.textContent = `Layer ${layerIndex + 1}`;
   elements.attentionMeta.textContent = `Layer ${layerIndex + 1}`;
   elements.depthMeta.textContent = `Current: Layer ${layerIndex + 1}`;
+  elements.trendMeta.textContent = `Current marker: Layer ${layerIndex + 1}`;
   renderMetricGrid(
     elements.metricsGrid,
     layerEntry?.activation_metrics,
@@ -468,6 +638,7 @@ function renderAnalysisPanels() {
     }
   }
   renderDepthList(elements.depthList, state.layerAnalysis || [], layerIndex);
+  renderMetricTrends(elements.metricTrends, state.layerAnalysis || [], layerIndex);
 }
 
 async function loadLayerAnalysis(requestToken) {

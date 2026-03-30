@@ -1,6 +1,6 @@
 # Activation Storm
 
-![Activation Storm screenshot](img/screenshot_2026-03-28.png)
+![Activation Storm screenshot](img/screenshot_2026-03-30w.webp)
 
 Activation Storm is a local browser app for visualizing activations from a prompt as they move through an LLM layer by layer.
 

@@ -715,6 +715,97 @@ button[disabled] {
   font-size: 0.82rem;
 }
 
+.metric-trends-panel {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid rgba(174, 193, 214, 0.06);
+  border-radius: 10px;
+  background: rgba(8, 12, 18, 0.62);
+}
+
+.metric-trends-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.trend-card {
+  display: grid;
+  gap: 6px;
+  padding: 8px 8px 7px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.trend-card-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.trend-current,
+.trend-axis {
+  color: var(--muted);
+  font: 0.64rem/1.2 "IBM Plex Mono", "SFMono-Regular", monospace;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.trend-chart-row {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 6px;
+  align-items: stretch;
+}
+
+.trend-axis {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 2px 0 12px;
+}
+
+.trend-chart {
+  min-height: 76px;
+}
+
+.metric-trend-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.trend-baseline {
+  stroke: rgba(255, 255, 255, 0.08);
+  stroke-width: 1;
+}
+
+.trend-active-line {
+  stroke: rgba(254, 240, 138, 0.55);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.trend-line {
+  fill: none;
+  stroke: rgba(168, 217, 239, 0.92);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.trend-point {
+  fill: rgba(168, 217, 239, 0.9);
+}
+
+.trend-point.active {
+  fill: var(--active);
+  stroke: rgba(8, 12, 18, 0.95);
+  stroke-width: 1.5;
+}
+
 .legend-dot {
   display: inline-block;
   width: 10px;
@@ -755,11 +846,21 @@ button[disabled] {
     grid-template-columns: 1fr;
   }
 
+  .metric-trends-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .dashboard-logits,
   .dashboard-activations,
   .dashboard-attention,
   .dashboard-depth {
     grid-column: auto;
     grid-row: auto;
+  }
+}
+
+@media (max-width: 640px) {
+  .metric-trends-grid {
+    grid-template-columns: 1fr;
   }
 }
