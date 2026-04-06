@@ -1,5 +1,6 @@
 const state = {
   payload: null,
+  layerAnalysis: [],
   models: [],
   allTextures: [],
   visibleTextures: [],
@@ -7,6 +8,7 @@ const state = {
   playing: false,
   timer: null,
   lastPromptWasDefault: true,
+  analysisRequestToken: 0,
 };
 
 const elements = {
@@ -22,6 +24,14 @@ const elements = {
   analysisNote: document.getElementById("analysis-note"),
   logitsMeta: document.getElementById("logits-meta"),
   logitsList: document.getElementById("logits-list"),
+  metricsMeta: document.getElementById("metrics-meta"),
+  metricsGrid: document.getElementById("metrics-grid"),
+  attentionMeta: document.getElementById("attention-meta"),
+  attentionGrid: document.getElementById("attention-grid"),
+  depthMeta: document.getElementById("depth-meta"),
+  depthList: document.getElementById("depth-list"),
+  trendMeta: document.getElementById("trend-meta"),
+  metricTrends: document.getElementById("metric-trends"),
   statusPill: document.getElementById("status-pill"),
   modelMeta: document.getElementById("model-meta"),
   canvas: document.getElementById("storm-canvas"),
@@ -137,6 +147,36 @@ function base64ToBytes(base64) {
   return bytes;
 }
 
+function visibleTokenMask() {
+  if (!state.payload?.tokens?.length) {
+    return [];
+  }
+  const mask = state.payload.visible_token_mask;
+  if (Array.isArray(mask) && mask.length === state.payload.tokens.length) {
+    return mask;
+  }
+  return state.payload.tokens.map(() => true);
+}
+
+function displayRowIndices() {
+  if (!state.payload?.tokens?.length) {
+    return [];
+  }
+  if (elements.toggleSpecial.checked) {
+    return state.payload.tokens.map((_token, index) => index);
+  }
+  const mask = visibleTokenMask();
+  return mask.flatMap((isVisible, index) => (isVisible ? [index] : []));
+}
+
+function displayTokens() {
+  if (!state.payload?.tokens?.length) {
+    return [];
+  }
+  const rowIndices = displayRowIndices();
+  return rowIndices.map((index) => state.payload.tokens[index]);
+}
+
 function lerpColor(base, magnitude) {
   const eased = Math.pow(magnitude, 0.75);
   const floor = 8;
@@ -147,8 +187,7 @@ function lerpColor(base, magnitude) {
   ];
 }
 
-function createTexture(step) {
-  const bytes = base64ToBytes(step.encoded_field);
+function createTextureCanvas(step, bytes) {
   const canvas = document.createElement("canvas");
   canvas.width = step.cols;
   canvas.height = step.rows;
@@ -176,7 +215,30 @@ function createTexture(step) {
   }
 
   context.putImageData(image, 0, 0);
-  return { ...step, canvas, hotspots };
+  return { canvas, hotspots };
+}
+
+function createTexture(step) {
+  const bytes = base64ToBytes(step.encoded_field);
+  const { canvas, hotspots } = createTextureCanvas(step, bytes);
+  return { ...step, canvas, hotspots, sourceBytes: bytes, fullRows: step.rows };
+}
+
+function filterTextureRows(step, rowIndices) {
+  if (rowIndices.length === step.fullRows) {
+    return step;
+  }
+
+  const filteredBytes = new Uint8Array(rowIndices.length * step.cols);
+  rowIndices.forEach((rowIndex, filteredRowIndex) => {
+    const sourceStart = rowIndex * step.cols;
+    const targetStart = filteredRowIndex * step.cols;
+    filteredBytes.set(step.sourceBytes.subarray(sourceStart, sourceStart + step.cols), targetStart);
+  });
+
+  const filteredStep = { ...step, rows: rowIndices.length };
+  const { canvas, hotspots } = createTextureCanvas(filteredStep, filteredBytes);
+  return { ...filteredStep, canvas, hotspots };
 }
 
 function desiredCanvasHeight() {
@@ -184,7 +246,7 @@ function desiredCanvasHeight() {
     return 760;
   }
 
-  const tokenCount = Math.max(state.payload.tokens.length, 1);
+  const tokenCount = Math.max(displayTokens().length, 1);
   return CANVAS_TOP_PADDING + OVERVIEW_HEIGHT + DETAIL_TOP_GAP + (tokenCount * TOKEN_ROW_HEIGHT) + DETAIL_META_SPACE + CANVAS_BOTTOM_PADDING;
 }
 
@@ -206,7 +268,7 @@ function renderTokenStrip() {
     return;
   }
 
-  state.payload.tokens.forEach((token) => {
+  displayTokens().forEach((token) => {
     const chip = document.createElement("span");
     chip.className = "token-chip";
     chip.textContent = token === " " ? "␠" : token;
@@ -214,11 +276,11 @@ function renderTokenStrip() {
   });
 }
 
-function layerTopTokensMap() {
-  if (!state.payload?.layer_top_tokens) {
+function layerAnalysisMap() {
+  if (!state.layerAnalysis?.length) {
     return new Map();
   }
-  return new Map(state.payload.layer_top_tokens.map((entry) => [entry.layer_index, entry.top_tokens]));
+  return new Map(state.layerAnalysis.map((entry) => [entry.layer_index, entry]));
 }
 
 function renderLogitList(container, topTokens, emptyText) {
@@ -249,10 +311,268 @@ function renderLogitList(container, topTokens, emptyText) {
   });
 }
 
-function renderLogitPanels() {
+function formatMetricValue(value, decimals = 2, suffix = "") {
+  if (value == null || Number.isNaN(value)) {
+    return "—";
+  }
+  return `${Number(value).toFixed(decimals)}${suffix}`;
+}
+
+function renderMetricGrid(container, metrics, specs, emptyText) {
+  container.innerHTML = "";
+  if (!metrics) {
+    const empty = document.createElement("div");
+    empty.className = "logit-empty";
+    empty.textContent = emptyText;
+    container.appendChild(empty);
+    return;
+  }
+
+  specs.forEach((spec) => {
+    const card = document.createElement("div");
+    card.className = "metric-card";
+
+    const labelRow = document.createElement("div");
+    labelRow.className = "metric-label-row";
+
+    const label = document.createElement("span");
+    label.className = "metric-label";
+    label.textContent = spec.label;
+
+    const info = document.createElement("span");
+    info.className = "metric-info";
+    info.textContent = "i";
+    info.tabIndex = 0;
+    info.setAttribute("role", "img");
+    info.setAttribute("aria-label", `${spec.label}: ${spec.description}`);
+    info.dataset.tooltip = spec.description;
+
+    const value = document.createElement("span");
+    value.className = "metric-value";
+    value.textContent = formatMetricValue(metrics[spec.key], spec.decimals, spec.suffix || "");
+
+    labelRow.appendChild(label);
+    labelRow.appendChild(info);
+    card.appendChild(labelRow);
+    card.appendChild(value);
+    container.appendChild(card);
+  });
+}
+
+function renderDepthList(container, entries, activeLayerIndex) {
+  container.innerHTML = "";
+  if (!entries?.length) {
+    const empty = document.createElement("div");
+    empty.className = "logit-empty";
+    empty.textContent = "Run a prompt to inspect layer contribution shifts.";
+    container.appendChild(empty);
+    return;
+  }
+
+  const maxValue = Math.max(...entries.map((entry) => entry.contribution_metrics.logit_shift_rms), 1e-6);
+  entries.forEach((entry) => {
+    const row = document.createElement("div");
+    row.className = `depth-row${entry.layer_index === activeLayerIndex ? " active" : ""}`;
+
+    const value = document.createElement("span");
+    value.className = "depth-value";
+    value.textContent = formatMetricValue(entry.contribution_metrics.logit_shift_rms);
+
+    const barWrap = document.createElement("div");
+    barWrap.className = "depth-bar-wrap";
+
+    const bar = document.createElement("div");
+    bar.className = "depth-bar";
+    bar.style.height = `${(entry.contribution_metrics.logit_shift_rms / maxValue) * 100}%`;
+    barWrap.appendChild(bar);
+
+    const label = document.createElement("span");
+    label.className = "depth-label";
+    label.textContent = `L${String(entry.layer_index + 1).padStart(2, "0")}`;
+
+    row.appendChild(value);
+    row.appendChild(barWrap);
+    row.appendChild(label);
+    container.appendChild(row);
+  });
+}
+
+function metricTrendSpecs() {
+  return [
+    { group: "activation_metrics", key: "layer_variance", label: "Layer Variance", decimals: 2, description: "Residual variance across layers." },
+    { group: "activation_metrics", key: "kurtosis", label: "Kurtosis", decimals: 2, description: "Channel outlier concentration across layers." },
+    { group: "activation_metrics", key: "top_energy_share", label: "Top 1% Energy", decimals: 1, suffix: "%", multiplier: 100, description: "Top-channel energy share across layers." },
+    { group: "activation_metrics", key: "participation_ratio", label: "Participation", decimals: 2, description: "Effective spread of representation across layers." },
+    { group: "attention_metrics", key: "mean_entropy", label: "Mean Entropy", decimals: 2, description: "Attention spread across layers." },
+    { group: "attention_metrics", key: "sink_mass", label: "Sink Mass", decimals: 2, description: "Mass on the first token across layers." },
+    { group: "attention_metrics", key: "sink_head_ratio", label: "Sink Heads", decimals: 1, suffix: "%", multiplier: 100, description: "Share of sink-seeking rows across layers." },
+    { group: "contribution_metrics", key: "logit_shift_rms", label: "Logit Shift", decimals: 2, description: "Prediction-space movement across layers." },
+  ];
+}
+
+function extractMetricSeries(entries, spec) {
+  return entries.map((entry) => {
+    const value = entry?.[spec.group]?.[spec.key];
+    if (value == null || Number.isNaN(value)) {
+      return Number.NaN;
+    }
+    return spec.multiplier ? value * spec.multiplier : value;
+  });
+}
+
+function paddedMetricRange(values) {
+  const finite = values.filter((value) => Number.isFinite(value));
+  if (!finite.length) {
+    return { min: 0, max: 1 };
+  }
+  const min = Math.min(...finite);
+  const max = Math.max(...finite);
+  if (Math.abs(max - min) < 1e-9) {
+    const pad = Math.max(Math.abs(max) * 0.02, 0.02);
+    return { min: min - pad, max: max + pad };
+  }
+  const pad = (max - min) * 0.08;
+  return { min: min - pad, max: max + pad };
+}
+
+function buildMetricTrendSvg(values, activeLayerIndex) {
+  const width = 320;
+  const height = 108;
+  const left = 12;
+  const right = width - 12;
+  const top = 10;
+  const bottom = height - 18;
+  const plotWidth = Math.max(right - left, 1);
+  const plotHeight = Math.max(bottom - top, 1);
+  const finiteIndices = values.flatMap((value, index) => (Number.isFinite(value) ? [index] : []));
+  if (!finiteIndices.length) {
+    return "";
+  }
+
+  const range = paddedMetricRange(values);
+  const xFor = (index) => {
+    if (values.length <= 1) {
+      return left + plotWidth / 2;
+    }
+    return left + (index / (values.length - 1)) * plotWidth;
+  };
+  const yFor = (value) => {
+    const normalized = (value - range.min) / Math.max(range.max - range.min, 1e-9);
+    return bottom - (normalized * plotHeight);
+  };
+
+  const path = finiteIndices
+    .map((index, offset) => `${offset === 0 ? "M" : "L"} ${xFor(index).toFixed(2)} ${yFor(values[index]).toFixed(2)}`)
+    .join(" ");
+
+  const points = finiteIndices
+    .map((index) => {
+      const isActive = index === activeLayerIndex;
+      const radius = isActive ? 4.5 : 2.5;
+      const klass = isActive ? "trend-point active" : "trend-point";
+      return `<circle class="${klass}" cx="${xFor(index).toFixed(2)}" cy="${yFor(values[index]).toFixed(2)}" r="${radius}"></circle>`;
+    })
+    .join("");
+
+  const activeLine = activeLayerIndex >= 0 && activeLayerIndex < values.length
+    ? `<line class="trend-active-line" x1="${xFor(activeLayerIndex).toFixed(2)}" y1="${top}" x2="${xFor(activeLayerIndex).toFixed(2)}" y2="${bottom}"></line>`
+    : "";
+
+  return `
+    <svg viewBox="0 0 ${width} ${height}" class="metric-trend-svg" aria-hidden="true">
+      <line class="trend-baseline" x1="${left}" y1="${bottom}" x2="${right}" y2="${bottom}"></line>
+      ${activeLine}
+      <path class="trend-line" d="${path}"></path>
+      ${points}
+    </svg>
+  `;
+}
+
+function renderMetricTrends(container, entries, activeLayerIndex) {
+  container.innerHTML = "";
+  if (!entries?.length) {
+    const empty = document.createElement("div");
+    empty.className = "logit-empty";
+    empty.textContent = "Run a prompt to inspect layer-by-layer metric trends.";
+    container.appendChild(empty);
+    return;
+  }
+
+  metricTrendSpecs().forEach((spec) => {
+    const values = extractMetricSeries(entries, spec);
+    const currentValue = activeLayerIndex >= 0 ? values[activeLayerIndex] : Number.NaN;
+    const finiteValues = values.filter((value) => Number.isFinite(value));
+
+    const card = document.createElement("article");
+    card.className = "trend-card";
+
+    const header = document.createElement("div");
+    header.className = "trend-card-header";
+
+    const titleRow = document.createElement("div");
+    titleRow.className = "metric-label-row";
+
+    const title = document.createElement("span");
+    title.className = "metric-label";
+    title.textContent = spec.label;
+
+    const info = document.createElement("span");
+    info.className = "metric-info";
+    info.textContent = "i";
+    info.tabIndex = 0;
+    info.setAttribute("role", "img");
+    info.setAttribute("aria-label", `${spec.label}: ${spec.description}`);
+    info.dataset.tooltip = spec.description;
+
+    titleRow.appendChild(title);
+    titleRow.appendChild(info);
+
+    const current = document.createElement("span");
+    current.className = "trend-current";
+    current.textContent = `L${String(activeLayerIndex + 1).padStart(2, "0")} ${formatMetricValue(currentValue, spec.decimals, spec.suffix || "")}`;
+
+    header.appendChild(titleRow);
+    header.appendChild(current);
+
+    const axis = document.createElement("div");
+    axis.className = "trend-axis";
+
+    const maxLabel = document.createElement("span");
+    maxLabel.textContent = formatMetricValue(Math.max(...finiteValues), spec.decimals, spec.suffix || "");
+
+    const minLabel = document.createElement("span");
+    minLabel.textContent = formatMetricValue(Math.min(...finiteValues), spec.decimals, spec.suffix || "");
+
+    axis.appendChild(maxLabel);
+    axis.appendChild(minLabel);
+
+    const svgWrap = document.createElement("div");
+    svgWrap.className = "trend-chart";
+    svgWrap.innerHTML = buildMetricTrendSvg(values, activeLayerIndex);
+
+    const chartRow = document.createElement("div");
+    chartRow.className = "trend-chart-row";
+    chartRow.appendChild(axis);
+    chartRow.appendChild(svgWrap);
+
+    card.appendChild(header);
+    card.appendChild(chartRow);
+    container.appendChild(card);
+  });
+}
+
+function renderAnalysisPanels() {
   if (!state.payload) {
     elements.logitsMeta.textContent = "Awaiting analysis";
     renderLogitList(elements.logitsList, [], "Run a prompt to inspect layer LogitLens results.");
+    elements.metricsMeta.textContent = "Current layer";
+    elements.attentionMeta.textContent = "Current layer";
+    elements.depthMeta.textContent = "Logit shift by layer";
+    elements.trendMeta.textContent = "Layer-by-layer metric shapes";
+    renderMetricGrid(elements.metricsGrid, null, [], "Run a prompt to inspect activation metrics.");
+    renderMetricGrid(elements.attentionGrid, null, [], "Run a prompt to inspect attention metrics.");
+    renderDepthList(elements.depthList, [], -1);
+    renderMetricTrends(elements.metricTrends, [], -1);
     return;
   }
 
@@ -260,25 +580,102 @@ function renderLogitPanels() {
   if (!active) {
     elements.logitsMeta.textContent = "Select a step";
     renderLogitList(elements.logitsList, [], "No LogitLens data available.");
+    renderMetricGrid(elements.metricsGrid, null, [], "No activation metrics available.");
+    renderMetricGrid(elements.attentionGrid, null, [], "No attention metrics available.");
+    renderDepthList(elements.depthList, state.layerAnalysis || [], -1);
+    renderMetricTrends(elements.metricTrends, state.layerAnalysis || [], -1);
     return;
   }
 
   const layerIndex = Math.max(active.layer_index, 0);
-  const topTokens = layerTopTokensMap().get(layerIndex) || [];
+  const layerEntry = layerAnalysisMap().get(layerIndex) || null;
+  const topTokens = layerEntry?.top_tokens || [];
   const targetToken = state.payload.target_token === " " ? "␠" : state.payload.target_token;
   const isFinalLayer = state.payload.model && layerIndex === (state.payload.model.layer_count - 1);
   elements.logitsMeta.textContent = isFinalLayer
     ? `Final logits after ${targetToken}`
     : `Layer ${layerIndex + 1} logits after ${targetToken}`;
-  renderLogitList(elements.logitsList, topTokens, "No LogitLens data for the current layer.");
+  renderLogitList(
+    elements.logitsList,
+    topTokens,
+    state.layerAnalysis.length ? "No LogitLens data for the current layer." : "Computing LogitLens and metrics…",
+  );
+  elements.metricsMeta.textContent = `Layer ${layerIndex + 1}`;
+  elements.attentionMeta.textContent = `Layer ${layerIndex + 1}`;
+  elements.depthMeta.textContent = `Current: Layer ${layerIndex + 1}`;
+  elements.trendMeta.textContent = `Current marker: Layer ${layerIndex + 1}`;
+  renderMetricGrid(
+    elements.metricsGrid,
+    layerEntry?.activation_metrics,
+    [
+      { key: "layer_variance", label: "Layer Variance", decimals: 2, description: "How much the layer residual values vary overall, which is a simple depth-growth proxy." },
+      { key: "kurtosis", label: "Kurtosis", decimals: 2, description: "How uneven the channel magnitudes are, with higher values meaning stronger outlier channels." },
+      { key: "top_energy_share", label: "Top 1% Energy", decimals: 1, description: "How much of the layer energy sits in the strongest 1% of channels." },
+      { key: "participation_ratio", label: "Participation", decimals: 2, description: "Roughly how many dimensions are carrying meaningful signal here." },
+    ],
+    state.layerAnalysis.length ? "No activation metrics for the current layer." : "Computing activation metrics…",
+  );
+  renderMetricGrid(
+    elements.attentionGrid,
+    layerEntry?.attention_metrics,
+    [
+      { key: "mean_entropy", label: "Mean Entropy", decimals: 2, description: "How spread out attention is across source tokens, averaged over heads and query positions." },
+      { key: "sink_mass", label: "Sink Mass", decimals: 2, description: "How much attention flows into the first token on average, a common sink location." },
+      { key: "sink_head_ratio", label: "Sink Heads", decimals: 1, description: "Percent of attention rows whose top target is the first token." },
+    ],
+    state.layerAnalysis.length ? "No attention metrics for the current layer." : "Computing attention metrics…",
+  );
+  if (layerEntry?.activation_metrics) {
+    const energyCard = elements.metricsGrid.querySelectorAll(".metric-value")[2];
+    if (energyCard) {
+      energyCard.textContent = formatMetricValue(layerEntry.activation_metrics.top_energy_share * 100, 1, "%");
+    }
+  }
+  if (layerEntry?.attention_metrics) {
+    const attentionValues = elements.attentionGrid.querySelectorAll(".metric-value");
+    if (attentionValues[2]) {
+      attentionValues[2].textContent = formatMetricValue(layerEntry.attention_metrics.sink_head_ratio * 100, 1, "%");
+    }
+  }
+  renderDepthList(elements.depthList, state.layerAnalysis || [], layerIndex);
+  renderMetricTrends(elements.metricTrends, state.layerAnalysis || [], layerIndex);
+}
+
+async function loadLayerAnalysis(requestToken) {
+  try {
+    const payload = await fetchJson("/api/layer-analysis", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model_id: elements.modelSelect.value,
+        prompt: elements.promptInput.value,
+        include_special_tokens: true,
+      }),
+    });
+
+    if (requestToken !== state.analysisRequestToken || !state.payload) {
+      return;
+    }
+    state.layerAnalysis = payload.layer_analysis || [];
+    renderAnalysisPanels();
+  } catch (_error) {
+    if (requestToken !== state.analysisRequestToken) {
+      return;
+    }
+    state.layerAnalysis = [];
+    renderAnalysisPanels();
+  }
 }
 
 function updateVisibleSteps(preferredStepIndex = null) {
   const families = selectedFamilies();
   const active = activeTexture();
   const keepStepIndex = preferredStepIndex ?? (active ? active.step_index : null);
+  const rowIndices = displayRowIndices();
 
-  state.visibleTextures = state.allTextures.filter((step) => families[familyForStep(step)]);
+  state.visibleTextures = state.allTextures
+    .filter((step) => families[familyForStep(step)])
+    .map((step) => filterTextureRows(step, rowIndices));
 
   if (!state.visibleTextures.length) {
     state.visibleIndex = 0;
@@ -286,8 +683,8 @@ function updateVisibleSteps(preferredStepIndex = null) {
     elements.playButton.disabled = true;
     elements.stepLabel.textContent = "Step: Select at least one stage family";
     elements.stepCounter.textContent = "0 / 0";
-    renderLogitPanels();
-    render();
+    renderAnalysisPanels();
+    resizeCanvas();
     return;
   }
 
@@ -298,8 +695,8 @@ function updateVisibleSteps(preferredStepIndex = null) {
   elements.stepSlider.max = String(Math.max(state.visibleTextures.length - 1, 0));
   elements.stepSlider.value = String(state.visibleIndex);
   updateStepLabel();
-  renderLogitPanels();
-  render();
+  renderAnalysisPanels();
+  resizeCanvas();
 }
 
 function updateStepLabel() {
@@ -349,7 +746,7 @@ function setVisibleStep(index) {
   state.visibleIndex = Math.max(0, Math.min(index, state.visibleTextures.length - 1));
   elements.stepSlider.value = String(state.visibleIndex);
   updateStepLabel();
-  renderLogitPanels();
+  renderAnalysisPanels();
   render();
 }
 
@@ -566,13 +963,14 @@ function drawDetail(context, detail) {
   context.fillStyle = "rgba(169, 207, 241, 0.72)";
   context.fillText(`${step.rows} tokens × ${step.cols} hidden dims`, detail.x, detail.y + detail.height + 18);
 
-  const tokenLabelCount = state.payload.tokens.length;
+  const tokens = displayTokens();
+  const tokenLabelCount = tokens.length;
   const fontSize = 12;
   context.font = `${fontSize}px IBM Plex Sans`;
   for (let index = 0; index < tokenLabelCount; index += 1) {
     const y = detail.y + ((index + 0.5) * TOKEN_ROW_HEIGHT);
     context.fillStyle = "rgba(212, 233, 255, 0.72)";
-    context.fillText(state.payload.tokens[index], detail.x - 116, y + 4);
+    context.fillText(tokens[index], detail.x - 116, y + 4);
   }
   context.restore();
 }
@@ -592,7 +990,7 @@ function render() {
     return;
   }
 
-  const tokenCount = state.payload.tokens.length;
+  const tokenCount = displayTokens().length;
   const detailHeight = Math.max(tokenCount, 1) * TOKEN_ROW_HEIGHT;
   const overview = {
     x: 24,
@@ -629,6 +1027,8 @@ async function analyzePrompt() {
   stopPlayback();
   setStatus("Analyzing", "busy");
   elements.analyzeButton.disabled = true;
+  const requestToken = state.analysisRequestToken + 1;
+  state.analysisRequestToken = requestToken;
 
   try {
     const payload = await fetchJson("/api/analyze", {
@@ -637,27 +1037,33 @@ async function analyzePrompt() {
       body: JSON.stringify({
         model_id: elements.modelSelect.value,
         prompt: elements.promptInput.value,
-        include_special_tokens: elements.toggleSpecial.checked,
+        include_special_tokens: true,
       }),
     });
 
     state.payload = payload;
+    state.layerAnalysis = [];
     state.allTextures = payload.steps.map(createTexture);
     renderTokenStrip();
-    renderLogitPanels();
-    elements.analysisNote.textContent = `${payload.tokens.length} visible tokens across ${payload.steps.length} stage steps${elements.toggleSpecial.checked ? ", including special tokens" : ""}.`;
+    renderAnalysisPanels();
+    const visibleCount = visibleTokenMask().filter(Boolean).length;
+    elements.analysisNote.textContent = elements.toggleSpecial.checked
+      ? `${payload.tokens.length} total tokens across ${payload.steps.length} stage steps, including special tokens.`
+      : `${visibleCount} visible prompt tokens shown out of ${payload.tokens.length} total tokens across ${payload.steps.length} stage steps.`;
     resizeCanvas();
     updateVisibleSteps();
     setStatus("Ready", "ready");
+    loadLayerAnalysis(requestToken);
   } catch (error) {
     setStatus("Error", "busy");
     elements.stepLabel.textContent = `Step: ${error.message}`;
     elements.stepCounter.textContent = "0 / 0";
     elements.analysisNote.textContent = "";
     state.payload = null;
+    state.layerAnalysis = [];
     state.allTextures = [];
     state.visibleTextures = [];
-    renderLogitPanels();
+    renderAnalysisPanels();
     render();
   } finally {
     elements.analyzeButton.disabled = false;
@@ -685,7 +1091,13 @@ elements.stepSlider.addEventListener("input", (event) => {
 elements.toggleSpecial.addEventListener("change", () => {
   stopPlayback();
   if (state.payload) {
-    analyzePrompt();
+    renderTokenStrip();
+    const active = activeTexture();
+    updateVisibleSteps(active ? active.step_index : null);
+    const visibleCount = visibleTokenMask().filter(Boolean).length;
+    elements.analysisNote.textContent = elements.toggleSpecial.checked
+      ? `${state.payload.tokens.length} total tokens across ${state.payload.steps.length} stage steps, including special tokens.`
+      : `${visibleCount} visible prompt tokens shown out of ${state.payload.tokens.length} total tokens across ${state.payload.steps.length} stage steps.`;
   }
 });
 window.addEventListener("resize", resizeCanvas);
@@ -700,12 +1112,12 @@ elements.modelSelect.addEventListener("change", () => {
 loadModels()
   .then(() => {
     setStatus("Idle", "idle");
-    renderLogitPanels();
+    renderAnalysisPanels();
     resizeCanvas();
   })
   .catch((error) => {
     setStatus("Error", "busy");
     elements.modelMeta.textContent = error.message;
-    renderLogitPanels();
+    renderAnalysisPanels();
     resizeCanvas();
   });

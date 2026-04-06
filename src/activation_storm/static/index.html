@@ -71,17 +71,62 @@
             <span><i class="legend-dot positive"></i> Positive activation </span>
             <span><i class="legend-dot negative"></i> Negative activation </span>
           </div>
-        </section>
-
-        <aside class="logit-panels">
-          <article class="logit-panel">
+          <section class="analysis-dashboard">
+            <article class="logit-panel dashboard-logits">
+              <div class="logit-panel-header">
+                <span class="panel-title-row">
+                  <span>Layer LogitLens</span>
+                  <span
+                    class="metric-info"
+                    tabindex="0"
+                    role="img"
+                    aria-label="Layer LogitLens: Shows the top next-token logits implied by the current layer's final residual stream."
+                    data-tooltip="Shows the top next-token logits implied by the current layer's final residual stream."
+                  >i</span>
+                </span>
+                <span id="logits-meta" class="logit-panel-meta">Awaiting analysis</span>
+              </div>
+              <div id="logits-list" class="logit-list"></div>
+            </article>
+            <article class="metrics-panel dashboard-activations">
+              <div class="logit-panel-header">
+                <span>Activation Metrics</span>
+                <span id="metrics-meta" class="logit-panel-meta">Current layer</span>
+              </div>
+              <div id="metrics-grid" class="metrics-grid"></div>
+            </article>
+            <article class="metrics-panel dashboard-attention">
+              <div class="logit-panel-header">
+                <span>Attention + Sink</span>
+                <span id="attention-meta" class="logit-panel-meta">Current layer</span>
+              </div>
+              <div id="attention-grid" class="metrics-grid"></div>
+            </article>
+            <article class="depth-panel dashboard-depth">
+              <div class="logit-panel-header">
+                <span class="panel-title-row">
+                  <span>Depth Utilization</span>
+                  <span
+                    class="metric-info"
+                    tabindex="0"
+                    role="img"
+                    aria-label="Depth Utilization: Compares how much each layer changes the next-token logits, so larger bars mean a stronger layer effect."
+                    data-tooltip="Compares how much each layer changes the next-token logits, so larger bars mean a stronger layer effect."
+                  >i</span>
+                </span>
+                <span id="depth-meta" class="logit-panel-meta">Logit shift by layer</span>
+              </div>
+              <div id="depth-list" class="depth-list"></div>
+            </article>
+          </section>
+          <section class="metric-trends-panel">
             <div class="logit-panel-header">
-              <span>Layer LogitLens</span>
-              <span id="logits-meta" class="logit-panel-meta">Awaiting analysis</span>
+              <span>Metric Trends</span>
+              <span id="trend-meta" class="logit-panel-meta">Layer-by-layer metric shapes</span>
             </div>
-            <div id="logits-list" class="logit-list"></div>
-          </article>
-        </aside>
+            <div id="metric-trends" class="metric-trends-grid"></div>
+          </section>
+        </section>
       </div>
     </main>
 

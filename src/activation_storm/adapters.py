@@ -32,6 +32,7 @@ TL_MODEL_SPECS = [
     TLModelSpec("meta-llama/Llama-3.2-1B-Instruct", "Llama 3.2 1B Instruct", "chat", 16, 2048),
     TLModelSpec("meta-llama/Llama-3.2-3B-Instruct", "Llama 3.2 3B Instruct", "chat", 28, 3072),
     TLModelSpec("mistral-7b", "Mistral 7B", "base", 32, 4096),
+    TLModelSpec("qwen2.5-0.5b", "Qwen 2.5 0.5B", "base", 24, 896, trust_remote_code=True),
     TLModelSpec("qwen-1.8b", "Qwen 1.8B", "base", 24, 2048, trust_remote_code=True),
     TLModelSpec("qwen-1.8b-chat", "Qwen 1.8B Chat", "chat", 24, 2048, trust_remote_code=True),
     TLModelSpec("qwen3-1.7b", "Qwen3 1.7B", "base", 28, 2048, trust_remote_code=True),
@@ -54,7 +55,12 @@ class ModelAdapter:
     def architecture_text(self) -> str:
         raise NotImplementedError
 
-    def analyze_prompt(self, prompt: str, include_special_tokens: bool = False) -> FlowAnalysisResult:
+    def analyze_prompt(
+        self,
+        prompt: str,
+        include_special_tokens: bool = False,
+        include_layer_analysis: bool = True,
+    ) -> FlowAnalysisResult:
         raise NotImplementedError
 
     def release(self) -> None:
