@@ -13,7 +13,9 @@
     - [x] TransformerLens adapter
     - [x] Qwen loading problems (transformers 5.4 incompatibility)
     - [ ] Might have a memory leak (VRAM model switching is ok)
-- [ ] Add activation metrics:
+    - [ ] Pythia 160M final layer logits capping problems
+    - [ ] `BeamSearchScorer` import problem (at Qwen 1.8B Chat)
+- [x] Add activation metrics:
     - Residual anisotropy
     - Attention entropy
     - MLP activation kurtosis
@@ -25,4 +27,13 @@
 - [ ] Incorporate neuron descriptions
     - Transluce Llama-3.1 neuron [database](https://transluce.org/neuron-descriptions)
 - [ ] Quasi circuits - select token -> highlight relevant neurons in each layer
-- [ ] Metrics dashboard - plot activation metrics across layers and tokens
+- [x] Metrics dashboard - plot activation metrics across layers and tokens
+
+## Second dashboard - "Cross-Inspect"
+- [ ] Load from first dashboard logs
+    - [ ] Average over prompts
+    - [ ] Compare two models side by side (metrics)
+    - [ ] Diff: same model, different prompts
+    - [ ] Diff: same prompt, different models
+
+## Third phase - AutoML using activation metrics
