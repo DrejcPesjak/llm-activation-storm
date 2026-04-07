@@ -115,7 +115,8 @@ class ApiTests(unittest.TestCase):
         static_dir = self.static_dir
         (static_dir / 'index.html').write_text('<h1>ok</h1>', encoding='utf-8')
         self.fake_adapter = FakeAdapter()
-        self.app = ActivationStormApp(static_dir=static_dir, registry={'fake': self.fake_adapter})
+        self.log_dir = Path(self.tempdir.name) / 'logs'
+        self.app = ActivationStormApp(static_dir=static_dir, registry={'fake': self.fake_adapter}, log_dir=self.log_dir)
 
     def tearDown(self):
         self.tempdir.cleanup()
@@ -193,6 +194,32 @@ class ApiTests(unittest.TestCase):
     def test_architecture_payload_validates_model(self):
         with self.assertRaises(ValueError):
             self.app.architecture_payload('missing')
+
+    def test_cross_inspect_runs_payload_reads_logged_metrics(self):
+        logger = RunLogger(LoggerConfig(log_dir=self.log_dir, enabled=True), session_stamp="2026-03-30_12-00")
+        app = ActivationStormApp(static_dir=self.static_dir, registry={'fake': self.fake_adapter}, logger=logger, log_dir=self.log_dir)
+        app.layer_analysis_payload({'model_id': 'fake', 'prompt': 'hello'})
+
+        payload = app.cross_inspect_runs_payload()
+
+        self.assertEqual(len(payload['runs']), 1)
+        self.assertEqual(payload['runs'][0]['model_id'], 'fake')
+        self.assertEqual(payload['runs'][0]['prompt_preview'], 'hello')
+
+    def test_cross_inspect_analyze_payload_aggregates_selection(self):
+        logger = RunLogger(LoggerConfig(log_dir=self.log_dir, enabled=True), session_stamp="2026-03-30_12-00")
+        app = ActivationStormApp(static_dir=self.static_dir, registry={'fake': self.fake_adapter}, logger=logger, log_dir=self.log_dir)
+        app.layer_analysis_payload({'model_id': 'fake', 'prompt': 'hello'})
+        app.layer_analysis_payload({'model_id': 'fake', 'prompt': 'world'})
+
+        result = app.cross_inspect_analyze_payload({
+            'mode': 'aggregate_selected',
+            'run_ids': ['metrics_2026-03-30_12-00.jsonl:1', 'metrics_2026-03-30_12-00.jsonl:2'],
+        })
+
+        self.assertEqual(result['group_a']['run_count'], 2)
+        self.assertIn('layer_variance', result['group_a']['metric_trends'])
+        self.assertIn('metric_catalog', result)
 
 
 if __name__ == '__main__':

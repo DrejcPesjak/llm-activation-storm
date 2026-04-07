@@ -10,14 +10,23 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .adapters import build_registry
+from .cross_inspect import CrossInspectStore
 from .logger import LoggerConfig, RunLogger
 
 
 class ActivationStormApp:
-    def __init__(self, static_dir: Path, registry: dict | None = None, logger: RunLogger | None = None) -> None:
+    def __init__(
+        self,
+        static_dir: Path,
+        registry: dict | None = None,
+        logger: RunLogger | None = None,
+        log_dir: Path | None = None,
+    ) -> None:
         self.static_dir = static_dir
         self.registry = registry if registry is not None else build_registry()
         self.logger = logger
+        self.log_dir = log_dir or Path("logs")
+        self.cross_inspect_store = CrossInspectStore(self.log_dir)
 
     def models_payload(self) -> dict:
         models = [adapter.model_info().to_dict() for adapter in self.registry.values()]
@@ -75,6 +84,14 @@ class ActivationStormApp:
             "architecture": adapter.architecture_text(),
         }
 
+    def cross_inspect_runs_payload(self) -> dict:
+        return {
+            "runs": [summary.to_dict() for summary in self.cross_inspect_store.list_runs()],
+        }
+
+    def cross_inspect_analyze_payload(self, payload: dict) -> dict:
+        return self.cross_inspect_store.analyze(payload)
+
     def _log_metrics(
         self,
         *,
@@ -110,6 +127,9 @@ class ActivationStormHandler(BaseHTTPRequestHandler):
         if path == "/api/models":
             self._send_json(HTTPStatus.OK, self.app.models_payload())
             return
+        if path == "/api/cross-inspect/runs":
+            self._send_json(HTTPStatus.OK, self.app.cross_inspect_runs_payload())
+            return
         if path == "/api/architecture":
             try:
                 model_id = parse_qs(parsed.query).get("model_id", [""])[0]
@@ -120,6 +140,9 @@ class ActivationStormHandler(BaseHTTPRequestHandler):
                 traceback.print_exc()
                 self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
             return
+        if path in {"/cross-inspect", "/cross-inspect/"}:
+            self._serve_static("/cross_inspect.html")
+            return
         if path == "/favicon.ico":
             self.send_response(HTTPStatus.NO_CONTENT)
             self.end_headers()
@@ -128,7 +151,7 @@ class ActivationStormHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
-        if path not in {"/api/analyze", "/api/layer-analysis"}:
+        if path not in {"/api/analyze", "/api/layer-analysis", "/api/cross-inspect/analyze"}:
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
             return
 
@@ -138,6 +161,8 @@ class ActivationStormHandler(BaseHTTPRequestHandler):
             payload = json.loads(raw or b"{}")
             if path == "/api/analyze":
                 result = self.app.analyze(payload)
+            elif path == "/api/cross-inspect/analyze":
+                result = self.app.cross_inspect_analyze_payload(payload)
             else:
                 result = self.app.layer_analysis_payload(payload)
             self._send_json(HTTPStatus.OK, result)
@@ -187,10 +212,11 @@ def run_server(
     enable_logging: bool = True,
 ) -> None:
     static_dir = Path(__file__).with_name("static")
+    log_dir_path = Path(log_dir)
     logger = None
     if enable_logging:
-        logger = RunLogger(LoggerConfig(log_dir=Path(log_dir), enabled=True))
-    app = ActivationStormApp(static_dir=static_dir, logger=logger)
+        logger = RunLogger(LoggerConfig(log_dir=log_dir_path, enabled=True))
+    app = ActivationStormApp(static_dir=static_dir, logger=logger, log_dir=log_dir_path)
     server = ActivationStormServer((host, port), ActivationStormHandler, app)
     print(f"Activation Storm running at http://{host}:{port}")
     try:

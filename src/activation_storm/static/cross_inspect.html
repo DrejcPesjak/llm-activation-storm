@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Activation Storm · Cross-Inspect</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell cross-shell">
+      <section class="hero cross-hero">
+        <div class="hero-main">
+          <p class="eyebrow">Second Dashboard</p>
+          <h1>Cross-Inspect</h1>
+          <p class="lede">Compare and aggregate logged prompt runs without loading a live model.</p>
+        </div>
+        <div class="hero-meta">
+          <span id="status-pill" class="pill idle">Idle</span>
+          <span id="run-count" class="meta-copy">Loading logged runs…</span>
+        </div>
+      </section>
+
+      <section class="cross-layout">
+        <aside class="cross-sidebar">
+          <section class="cross-panel">
+            <div class="cross-panel-header">
+              <div>
+                <p class="architecture-kicker">Run Selection</p>
+                <h2>Logged Runs</h2>
+              </div>
+              <div class="cross-inline-actions">
+                <button id="select-all-button" class="button-secondary" type="button">Select all visible</button>
+                <button id="clear-selection-button" class="button-secondary" type="button">Clear</button>
+              </div>
+            </div>
+            <p class="cross-panel-note">Cross-Inspect reads JSONL metrics logs created by the main dashboard.</p>
+            <div id="run-list" class="run-list"></div>
+          </section>
+        </aside>
+
+        <section class="cross-main">
+          <section class="cross-panel cross-control-panel">
+            <div class="cross-panel-header">
+              <div>
+                <p class="architecture-kicker">Analysis Mode</p>
+                <h2>Selection Actions</h2>
+              </div>
+            </div>
+            <div class="cross-controls">
+              <label class="field">
+                <span>Action</span>
+                <select id="mode-select">
+                  <option value="aggregate_selected">Aggregate selected</option>
+                  <option value="compare_two_runs">Compare two runs</option>
+                  <option value="compare_groups">Compare Group A vs Group B</option>
+                </select>
+              </label>
+              <div class="cross-actions">
+                <button id="analyze-button" type="button">Run analysis</button>
+              </div>
+            </div>
+            <div id="selection-summary" class="cross-summary-row"></div>
+            <p id="selection-error" class="cross-error"></p>
+          </section>
+
+          <section class="cross-panel">
+            <div class="cross-panel-header">
+              <div>
+                <p class="architecture-kicker">Results</p>
+                <h2 id="results-title">Awaiting analysis</h2>
+              </div>
+              <p id="results-meta" class="meta-copy">Select logged runs and choose an action.</p>
+            </div>
+            <div id="group-summary" class="cross-group-summary"></div>
+            <div id="metric-sections" class="cross-metric-sections"></div>
+            <div id="delta-section" class="cross-delta-section"></div>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <script src="/cross_inspect.js" defer></script>
+  </body>
+</html>
