@@ -103,16 +103,18 @@ def _relative_depth(layer_index: int, layer_count: int) -> float:
 
 
 def _mean(values: list[float]) -> float:
-    if not values:
+    finite_values = [value for value in values if math.isfinite(value)]
+    if not finite_values:
         return 0.0
-    return sum(values) / len(values)
+    return sum(finite_values) / len(finite_values)
 
 
 def _std(values: list[float]) -> float:
-    if len(values) < 2:
+    finite_values = [value for value in values if math.isfinite(value)]
+    if len(finite_values) < 2:
         return 0.0
-    mean_value = _mean(values)
-    variance = sum((value - mean_value) ** 2 for value in values) / len(values)
+    mean_value = _mean(finite_values)
+    variance = sum((value - mean_value) ** 2 for value in finite_values) / len(finite_values)
     return math.sqrt(variance)
 
 
@@ -305,6 +307,7 @@ class CrossInspectStore:
             peak_point = max(series, key=lambda point: abs(point["mean_delta"]))
             summaries[metric_key] = {
                 "series_mean": round(_mean(mean_values), 6),
+                "series_std": round(_std(mean_values), 6),
                 "peak_value": round(peak_point["mean_delta"], 6),
                 "peak_depth": round(peak_point["relative_depth"], 4),
                 "final_value": round(series[-1]["mean_delta"], 6),

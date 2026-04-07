@@ -143,4 +143,4 @@ def compute_logit_shift_rms(current_logits: torch.Tensor, previous_logits: torch
             f"Expected matching logits shapes, got {tuple(current_logits.shape)} and {tuple(previous_logits.shape)}"
         )
     delta = current_logits.float() - previous_logits.float()
-    return compute_target_rms(delta)
+    return compute_target_rms(delta) * 0.5

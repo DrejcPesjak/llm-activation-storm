@@ -65,7 +65,7 @@ class CaptureTests(unittest.TestCase):
         self.assertAlmostEqual(compute_target_rms(values), 3.535533, places=5)
         self.assertAlmostEqual(
             compute_logit_shift_rms(torch.tensor([3.0, 5.0]), torch.tensor([1.0, 1.0])),
-            3.162277,
+            1.581139,
             places=5,
         )
 

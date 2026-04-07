@@ -1027,8 +1027,7 @@ button[disabled] {
   background: rgba(169, 207, 241, 0.1);
 }
 
-.cross-group-summary,
-.cross-delta-grid {
+.cross-group-summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 10px;
@@ -1080,7 +1079,7 @@ button[disabled] {
 
 .cross-metric-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(300px, 0.33fr));
   gap: 10px;
 }
 
@@ -1093,7 +1092,7 @@ button[disabled] {
 
 .cross-metric-card-header {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 10px;
   margin-bottom: 8px;
 }
@@ -1115,24 +1114,53 @@ button[disabled] {
   overflow: visible;
 }
 
-.cross-axis {
-  fill: none;
-  stroke: rgba(174, 193, 214, 0.14);
+.cross-grid-line {
+  stroke: rgba(174, 193, 214, 0.09);
   stroke-width: 1;
+}
+
+.cross-grid-line.vertical {
+  stroke: rgba(174, 193, 214, 0.07);
+}
+
+.cross-tick-label {
+  fill: var(--muted-soft);
+  font: 0.66rem/1.2 "IBM Plex Mono", "SFMono-Regular", monospace;
 }
 
 .cross-line {
   fill: none;
-  stroke-width: 2;
+  stroke-width: 1.35;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
-.cross-metric-footer {
+.cross-inline-legend {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px 12px;
+  gap: 12px;
+  margin-bottom: 6px;
+  color: var(--muted-soft);
+  font-size: 0.75rem;
+}
+
+.legend-dot.cross-legend-a {
+  color: #8ad3ee;
+  background: #8ad3ee;
+}
+
+.legend-dot.cross-legend-b {
+  color: #f4b6d9;
+  background: #f4b6d9;
+}
+
+.cross-metric-footer {
+  display: grid;
+  gap: 6px;
   margin-top: 10px;
+}
+
+.cross-metric-footer span {
+  display: block;
 }
 
 @media (max-width: 1180px) {

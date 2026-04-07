@@ -179,13 +179,8 @@ function renderRunList() {
     prompt.className = "run-card-prompt";
     prompt.textContent = run.prompt_preview;
 
-    const meta = document.createElement("div");
-    meta.className = "run-card-meta";
-    meta.textContent = `${run.layer_count} layers • target ${run.target_token || "—"} • ${run.log_file}`;
-
     body.appendChild(top);
     body.appendChild(prompt);
-    body.appendChild(meta);
 
     if (compareGroups && selection.checked) {
       const groupRow = document.createElement("div");
@@ -223,47 +218,68 @@ function clearResults() {
   elements.deltaSection.innerHTML = "";
 }
 
-function linePath(points, width, height, valueKey, minValue, maxValue) {
+const CHART_LEFT = 38;
+const CHART_RIGHT = 302;
+const CHART_TOP = 18;
+const CHART_BOTTOM = 125;
+const X_AXIS_LABEL_Y = 140;
+const X_AXIS_PADDING_RATIO = 0.04;
+const Y_AXIS_PADDING_RATIO = 0.10;
+
+function paddedBounds(minValue, maxValue, paddingRatio) {
+  const range = maxValue - minValue;
+  if (Math.abs(range) < 1e-9) {
+    const base = Math.abs(maxValue) > 1e-9 ? Math.abs(maxValue) : 1;
+    const padding = base * paddingRatio;
+    return { minValue: minValue - padding, maxValue: maxValue + padding };
+  }
+  const padding = range * paddingRatio;
+  return { minValue: minValue - padding, maxValue: maxValue + padding };
+}
+
+function xPosition(relativeDepth) {
+  const paddedDepth = X_AXIS_PADDING_RATIO + (relativeDepth * (1 - (2 * X_AXIS_PADDING_RATIO)));
+  return CHART_LEFT + (paddedDepth * (CHART_RIGHT - CHART_LEFT));
+}
+
+function yPosition(value, minValue, maxValue) {
   const range = maxValue - minValue || 1;
+  return CHART_TOP + (1 - ((value - minValue) / range)) * (CHART_BOTTOM - CHART_TOP);
+}
+
+function linePath(points, valueKey, minValue, maxValue) {
   return points.map((point, index) => {
-    const x = 18 + point.relative_depth * (width - 36);
-    const y = 16 + (1 - ((point[valueKey] - minValue) / range)) * (height - 32);
+    const x = xPosition(point.relative_depth);
+    const y = yPosition(point[valueKey], minValue, maxValue);
     return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
   }).join(" ");
 }
 
-function bandPath(points, width, height, minValue, maxValue) {
-  const range = maxValue - minValue || 1;
+function bandPath(points, minValue, maxValue) {
   const upper = points.map((point) => {
-    const x = 18 + point.relative_depth * (width - 36);
-    const y = 16 + (1 - (((point.mean + point.std) - minValue) / range)) * (height - 32);
+    const x = xPosition(point.relative_depth);
+    const y = yPosition(point.mean + point.std, minValue, maxValue);
     return `${x.toFixed(2)} ${y.toFixed(2)}`;
   });
   const lower = [...points].reverse().map((point) => {
-    const x = 18 + point.relative_depth * (width - 36);
-    const y = 16 + (1 - (((point.mean - point.std) - minValue) / range)) * (height - 32);
+    const x = xPosition(point.relative_depth);
+    const y = yPosition(point.mean - point.std, minValue, maxValue);
     return `${x.toFixed(2)} ${y.toFixed(2)}`;
   });
   return `M ${upper.join(" L ")} L ${lower.join(" L ")} Z`;
 }
 
-function chartValueBounds(seriesA, seriesB = null, deltaSeries = null) {
+function chartValueBounds(seriesA, seriesB = null) {
   const values = [];
   [seriesA, seriesB].filter(Boolean).forEach((series) => {
     series.forEach((point) => {
       values.push(point.mean + point.std, point.mean - point.std);
     });
   });
-  if (deltaSeries) {
-    deltaSeries.forEach((point) => values.push(point.mean_delta));
-  }
   const minValue = Math.min(...values);
   const maxValue = Math.max(...values);
   if (!Number.isFinite(minValue) || !Number.isFinite(maxValue)) {
     return { minValue: 0, maxValue: 1 };
-  }
-  if (Math.abs(maxValue - minValue) < 1e-9) {
-    return { minValue: minValue - 1, maxValue: maxValue + 1 };
   }
   return { minValue, maxValue };
 }
@@ -272,49 +288,90 @@ function formatNumber(value) {
   return Number(value).toFixed(Math.abs(value) >= 100 ? 1 : 3);
 }
 
+function tickValues(minValue, maxValue, count = 4) {
+  if (!Number.isFinite(minValue) || !Number.isFinite(maxValue)) {
+    return [0, 0.333, 0.667, 1];
+  }
+  if (Math.abs(maxValue - minValue) < 1e-9) {
+    return [minValue];
+  }
+  return Array.from({ length: count }, (_value, index) => minValue + ((maxValue - minValue) * index) / (count - 1));
+}
+
 function createMetricCard(metric, sectionResult) {
   const card = document.createElement("article");
   card.className = "cross-metric-card";
 
   const header = document.createElement("div");
   header.className = "cross-metric-card-header";
-  header.innerHTML = `<strong>${metric.label}</strong><span>0% to 100% relative depth</span>`;
+  header.innerHTML = `<strong>${metric.label}</strong>`;
 
   const chart = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   chart.setAttribute("viewBox", "0 0 320 156");
   chart.setAttribute("class", "cross-chart");
 
-  const width = 320;
-  const height = 156;
   const seriesA = sectionResult.groupA.metric_trends[metric.key];
   const seriesB = sectionResult.groupB ? sectionResult.groupB.metric_trends[metric.key] : null;
-  const deltaSeries = sectionResult.delta ? sectionResult.delta.metric_trends[metric.key] : null;
-  const bounds = chartValueBounds(seriesA, seriesB, deltaSeries);
+  const tickBounds = chartValueBounds(seriesA, seriesB);
+  const plotBounds = paddedBounds(tickBounds.minValue, tickBounds.maxValue, Y_AXIS_PADDING_RATIO);
 
-  const grid = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  grid.setAttribute("d", "M 18 16 L 18 140 L 302 140");
-  grid.setAttribute("class", "cross-axis");
-  chart.appendChild(grid);
+  tickValues(tickBounds.minValue, tickBounds.maxValue).forEach((tickValue) => {
+    const y = yPosition(tickValue, plotBounds.minValue, plotBounds.maxValue);
+    const gridLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    gridLine.setAttribute("x1", String(CHART_LEFT));
+    gridLine.setAttribute("x2", String(CHART_RIGHT));
+    gridLine.setAttribute("y1", y.toFixed(2));
+    gridLine.setAttribute("y2", y.toFixed(2));
+    gridLine.setAttribute("class", "cross-grid-line");
+    chart.appendChild(gridLine);
+
+    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    label.setAttribute("x", "32");
+    label.setAttribute("y", (y + 4).toFixed(2));
+    label.setAttribute("text-anchor", "end");
+    label.setAttribute("class", "cross-tick-label");
+    label.textContent = formatNumber(tickValue);
+    chart.appendChild(label);
+  });
+
+  [0, 0.5, 1].forEach((tickValue) => {
+    const x = xPosition(tickValue);
+    const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    tick.setAttribute("x1", x.toFixed(2));
+    tick.setAttribute("x2", x.toFixed(2));
+    tick.setAttribute("y1", yPosition(plotBounds.maxValue, plotBounds.minValue, plotBounds.maxValue).toFixed(2));
+    tick.setAttribute("y2", yPosition(plotBounds.minValue, plotBounds.minValue, plotBounds.maxValue).toFixed(2));
+    tick.setAttribute("class", "cross-grid-line vertical");
+    chart.appendChild(tick);
+
+    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    label.setAttribute("x", x.toFixed(2));
+    label.setAttribute("y", String(X_AXIS_LABEL_Y));
+    label.setAttribute("text-anchor", "middle");
+    label.setAttribute("class", "cross-tick-label");
+    label.textContent = `${Math.round(tickValue * 100)}%`;
+    chart.appendChild(label);
+  });
 
   const bandA = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  bandA.setAttribute("d", bandPath(seriesA, width, height, bounds.minValue, bounds.maxValue));
-  bandA.setAttribute("fill", "rgba(138, 211, 238, 0.12)");
+  bandA.setAttribute("d", bandPath(seriesA, plotBounds.minValue, plotBounds.maxValue));
+  bandA.setAttribute("fill", "rgba(138, 211, 238, 0.18)");
   chart.appendChild(bandA);
 
   const lineA = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  lineA.setAttribute("d", linePath(seriesA, width, height, "mean", bounds.minValue, bounds.maxValue));
+  lineA.setAttribute("d", linePath(seriesA, "mean", plotBounds.minValue, plotBounds.maxValue));
   lineA.setAttribute("stroke", GROUP_COLORS.a);
   lineA.setAttribute("class", "cross-line");
   chart.appendChild(lineA);
 
   if (seriesB) {
     const bandB = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    bandB.setAttribute("d", bandPath(seriesB, width, height, bounds.minValue, bounds.maxValue));
-    bandB.setAttribute("fill", "rgba(244, 182, 217, 0.12)");
+    bandB.setAttribute("d", bandPath(seriesB, plotBounds.minValue, plotBounds.maxValue));
+    bandB.setAttribute("fill", "rgba(244, 182, 217, 0.18)");
     chart.appendChild(bandB);
 
     const lineB = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    lineB.setAttribute("d", linePath(seriesB, width, height, "mean", bounds.minValue, bounds.maxValue));
+    lineB.setAttribute("d", linePath(seriesB, "mean", plotBounds.minValue, plotBounds.maxValue));
     lineB.setAttribute("stroke", GROUP_COLORS.b);
     lineB.setAttribute("class", "cross-line");
     chart.appendChild(lineB);
@@ -324,18 +381,32 @@ function createMetricCard(metric, sectionResult) {
   footer.className = "cross-metric-footer";
 
   const summaryA = sectionResult.groupA.metric_summaries[metric.key];
-  footer.innerHTML = `
-    <span>A final ${formatNumber(summaryA.final_value)}</span>
-    <span>A peak ${formatNumber(summaryA.peak_value)} @ ${(summaryA.peak_depth * 100).toFixed(0)}%</span>
-  `;
+  const rows = [
+    `A final ${formatNumber(summaryA.final_value)} • A peak ${formatNumber(summaryA.peak_value)} @ ${(summaryA.peak_depth * 100).toFixed(0)}%`,
+  ];
 
   if (sectionResult.groupB) {
     const summaryB = sectionResult.groupB.metric_summaries[metric.key];
     const deltaSummary = sectionResult.delta.metric_summaries[metric.key];
-    footer.innerHTML += `
-      <span>B final ${formatNumber(summaryB.final_value)}</span>
-      <span>Δ final ${formatNumber(deltaSummary.final_value)}</span>
+    rows.push(`B final ${formatNumber(summaryB.final_value)} • B peak ${formatNumber(summaryB.peak_value)} @ ${(summaryB.peak_depth * 100).toFixed(0)}%`);
+    rows.push(`Δ final ${formatNumber(deltaSummary.final_value)} • Δ peak ${formatNumber(deltaSummary.peak_value)} @ ${(deltaSummary.peak_depth * 100).toFixed(0)}%`);
+    rows.push(`Δ mean ${formatNumber(deltaSummary.series_mean)} ± ${formatNumber(deltaSummary.series_std)}`);
+  }
+
+  footer.innerHTML = rows.map((row) => `<span>${row}</span>`).join("");
+
+  if (sectionResult.groupB) {
+    const legend = document.createElement("div");
+    legend.className = "cross-inline-legend";
+    legend.innerHTML = `
+      <span><i class="legend-dot cross-legend-a"></i> Group A</span>
+      <span><i class="legend-dot cross-legend-b"></i> Group B</span>
     `;
+    card.appendChild(header);
+    card.appendChild(legend);
+    card.appendChild(chart);
+    card.appendChild(footer);
+    return card;
   }
 
   card.appendChild(header);
@@ -378,6 +449,7 @@ function renderMetricSections(result) {
   result.metric_catalog.forEach((group) => {
     const section = document.createElement("section");
     section.className = "cross-metric-section";
+    section.dataset.groupId = group.group_id;
 
     const header = document.createElement("div");
     header.className = "cross-metric-section-header";
@@ -396,37 +468,6 @@ function renderMetricSections(result) {
 
 function renderDeltaSection(result) {
   elements.deltaSection.innerHTML = "";
-  if (!result.delta) {
-    return;
-  }
-
-  const section = document.createElement("section");
-  section.className = "cross-metric-section";
-
-  const header = document.createElement("div");
-  header.className = "cross-metric-section-header";
-  header.innerHTML = "<h3>Delta Summary</h3><p>Positive values mean Group B is above Group A.</p>";
-  section.appendChild(header);
-
-  const list = document.createElement("div");
-  list.className = "cross-delta-grid";
-
-  state.metricCatalog.forEach((group) => {
-    group.metrics.forEach((metric) => {
-      const summary = result.delta.metric_summaries[metric.key];
-      const card = document.createElement("div");
-      card.className = "cross-summary-card delta";
-      card.innerHTML = `
-        <strong>${metric.label}</strong>
-        <span>Series mean ${formatNumber(summary.series_mean)}</span>
-        <span>Peak ${formatNumber(summary.peak_value)} @ ${(summary.peak_depth * 100).toFixed(0)}%</span>
-        <span>Final ${formatNumber(summary.final_value)}</span>
-      `;
-      list.appendChild(card);
-    });
-  });
-  section.appendChild(list);
-  elements.deltaSection.appendChild(section);
 }
 
 function renderResults(result) {
