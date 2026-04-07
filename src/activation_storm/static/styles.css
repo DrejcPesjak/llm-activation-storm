@@ -915,9 +915,28 @@ button[disabled] {
   flex-wrap: wrap;
 }
 
+.icon-actions {
+  align-items: center;
+}
+
 .cross-inline-actions button,
 .cross-actions button {
   width: auto;
+}
+
+.icon-button {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 6px;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.icon-button .material-symbols-outlined {
+  display: block;
+  font-size: 19px;
+  line-height: 1;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
 }
 
 .cross-panel-note,
@@ -926,6 +945,69 @@ button[disabled] {
   margin: 0;
   color: var(--muted-soft);
   font-size: 0.84rem;
+}
+
+.cross-run-list-top {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin-top: 10px;
+  margin-bottom: 0;
+  padding: 0 0 14px;
+  background: rgba(10, 14, 19, 0.94);
+  border-bottom: 1px solid rgba(174, 193, 214, 0.05);
+  box-shadow: 0 20px 25px -10px rgba(0, 0, 0, 0.45);
+}
+
+.cross-filter-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.cross-filter-group {
+  display: grid;
+  gap: 6px;
+}
+
+.cross-filter-label {
+  font-size: 0.71rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted-soft);
+}
+
+.cross-filter-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cross-filter-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(174, 193, 214, 0.06);
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.cross-filter-item input {
+  width: auto;
+  margin: 0;
+  accent-color: #b9d8ee;
+}
+
+.cross-dialog {
+  width: min(780px, calc(100vw - 48px));
+}
+
+.cross-dialog-body {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px 22px;
 }
 
 .cross-error {
@@ -949,9 +1031,10 @@ button[disabled] {
 .run-list {
   display: grid;
   gap: 8px;
-  max-height: calc(100vh - 220px);
+  max-height: calc(100vh - 265px);
   overflow: auto;
   padding-right: 4px;
+  padding-top: 8px;
 }
 
 .run-card {
@@ -1141,6 +1224,11 @@ button[disabled] {
   margin-bottom: 6px;
   color: var(--muted-soft);
   font-size: 0.75rem;
+}
+
+.analysis-button {
+  padding-top: 10px;
+  padding-bottom: 10px;
 }
 
 .legend-dot.cross-legend-a {

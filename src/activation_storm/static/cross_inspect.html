@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Activation Storm · Cross-Inspect</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&icon_names=check_box,check_box_outline_blank,delete,filter_alt,refresh,swap_vert" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -27,12 +28,27 @@
                 <p class="architecture-kicker">Run Selection</p>
                 <h2>Logged Runs</h2>
               </div>
-              <div class="cross-inline-actions">
-                <button id="select-all-button" class="button-secondary" type="button">Select all visible</button>
-                <button id="clear-selection-button" class="button-secondary" type="button">Clear</button>
+              <div class="cross-inline-actions icon-actions">
+                <button id="refresh-runs-button" class="button-secondary icon-button" type="button" title="Refresh runs" aria-label="Refresh runs">
+                  <span class="material-symbols-outlined" aria-hidden="true">refresh</span>
+                </button>
+                <button id="select-all-button" class="button-secondary icon-button" type="button" title="Select or deselect all visible" aria-label="Select or deselect all visible">
+                  <span id="select-all-icon" class="material-symbols-outlined" aria-hidden="true">check_box_outline_blank</span>
+                </button>
+                <button id="clear-filters-toolbar-button" class="button-secondary icon-button" type="button" title="Reset filters and sorting" aria-label="Reset filters and sorting">
+                  <span class="material-symbols-outlined" aria-hidden="true">delete</span>
+                </button>
+                <button id="sort-button" class="button-secondary icon-button" type="button" title="Sort options" aria-label="Sort options">
+                  <span class="material-symbols-outlined" aria-hidden="true">swap_vert</span>
+                </button>
+                <button id="filter-button" class="button-secondary icon-button" type="button" title="Filter options" aria-label="Filter options">
+                  <span class="material-symbols-outlined" aria-hidden="true">filter_alt</span>
+                </button>
               </div>
             </div>
-            <p class="cross-panel-note">Cross-Inspect reads JSONL metrics logs created by the main dashboard.</p>
+            <div class="cross-run-list-top">
+              <p class="cross-panel-note">Cross-Inspect reads JSONL metrics logs created by the main dashboard.</p>
+            </div>
             <div id="run-list" class="run-list"></div>
           </section>
         </aside>
@@ -55,7 +71,7 @@
                 </select>
               </label>
               <div class="cross-actions">
-                <button id="analyze-button" type="button">Run analysis</button>
+                <button id="analyze-button" class="analysis-button" type="button">Run analysis</button>
               </div>
             </div>
             <div id="selection-summary" class="cross-summary-row"></div>
@@ -77,6 +93,71 @@
         </section>
       </section>
     </main>
+
+    <dialog id="sort-dialog" class="architecture-dialog cross-dialog">
+      <div class="architecture-dialog-inner">
+        <div class="architecture-dialog-header">
+          <div>
+            <p class="architecture-kicker">Sort</p>
+            <h2>Sort Logged Runs</h2>
+          </div>
+          <button id="sort-close-button" class="button-secondary architecture-close" type="button">Close</button>
+        </div>
+        <div class="cross-dialog-body">
+          <label class="field">
+            <span>Sort by</span>
+            <select id="sort-select">
+              <option value="timestamp_desc">Datetime · newest first</option>
+              <option value="timestamp_asc">Datetime · oldest first</option>
+              <option value="model_asc">Model name · A to Z</option>
+              <option value="model_desc">Model name · Z to A</option>
+            </select>
+          </label>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="filter-dialog" class="architecture-dialog cross-dialog">
+      <div class="architecture-dialog-inner">
+        <div class="architecture-dialog-header">
+          <div>
+            <p class="architecture-kicker">Filter</p>
+            <h2>Filter Logged Runs</h2>
+          </div>
+          <div class="cross-inline-actions">
+            <button id="clear-filters-button" class="button-secondary" type="button">Clear filters</button>
+            <button id="filter-close-button" class="button-secondary architecture-close" type="button">Close</button>
+          </div>
+        </div>
+        <div class="cross-dialog-body">
+          <label class="field">
+            <span>Datetime</span>
+            <select id="time-filter-select">
+              <option value="all">All logs</option>
+              <option value="30m">Last 30 min</option>
+              <option value="1h">Last 1 hour</option>
+              <option value="1d">Last day</option>
+              <option value="3d">Last 3 days</option>
+              <option value="7d">Last week</option>
+            </select>
+          </label>
+          <div class="cross-filter-stack">
+            <div class="cross-filter-group">
+              <span class="cross-filter-label">Model</span>
+              <div id="model-filter-options" class="cross-filter-options"></div>
+            </div>
+            <div class="cross-filter-group">
+              <span class="cross-filter-label">Layer count</span>
+              <div id="layer-filter-options" class="cross-filter-options"></div>
+            </div>
+            <div class="cross-filter-group">
+              <span class="cross-filter-label">Prompt mode</span>
+              <div id="mode-filter-options" class="cross-filter-options"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </dialog>
 
     <script src="/cross_inspect.js" defer></script>
   </body>

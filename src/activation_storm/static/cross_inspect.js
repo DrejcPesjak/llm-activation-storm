@@ -3,14 +3,31 @@ const state = {
   metricCatalog: [],
   selections: new Map(),
   result: null,
+  filters: {
+    sort: "timestamp_desc",
+    timeWindow: "all",
+    modelIds: new Set(),
+    layerCounts: new Set(),
+    promptModes: new Set(),
+  },
 };
 
 const elements = {
   statusPill: document.getElementById("status-pill"),
   runCount: document.getElementById("run-count"),
   runList: document.getElementById("run-list"),
+  refreshRunsButton: document.getElementById("refresh-runs-button"),
   selectAllButton: document.getElementById("select-all-button"),
-  clearSelectionButton: document.getElementById("clear-selection-button"),
+  selectAllIcon: document.getElementById("select-all-icon"),
+  clearFiltersToolbarButton: document.getElementById("clear-filters-toolbar-button"),
+  sortButton: document.getElementById("sort-button"),
+  filterButton: document.getElementById("filter-button"),
+  clearFiltersButton: document.getElementById("clear-filters-button"),
+  sortSelect: document.getElementById("sort-select"),
+  timeFilterSelect: document.getElementById("time-filter-select"),
+  modelFilterOptions: document.getElementById("model-filter-options"),
+  layerFilterOptions: document.getElementById("layer-filter-options"),
+  modeFilterOptions: document.getElementById("mode-filter-options"),
   modeSelect: document.getElementById("mode-select"),
   analyzeButton: document.getElementById("analyze-button"),
   selectionSummary: document.getElementById("selection-summary"),
@@ -20,6 +37,10 @@ const elements = {
   groupSummary: document.getElementById("group-summary"),
   metricSections: document.getElementById("metric-sections"),
   deltaSection: document.getElementById("delta-section"),
+  sortDialog: document.getElementById("sort-dialog"),
+  sortCloseButton: document.getElementById("sort-close-button"),
+  filterDialog: document.getElementById("filter-dialog"),
+  filterCloseButton: document.getElementById("filter-close-button"),
 };
 
 const GROUP_COLORS = {
@@ -51,6 +72,10 @@ function setStatus(label, className) {
 
 function runLookup(runId) {
   return state.runs.find((run) => run.run_id === runId) || null;
+}
+
+function parseTimestamp(timestamp) {
+  return new Date(timestamp).getTime();
 }
 
 function ensureSelection(runId) {
@@ -128,18 +153,141 @@ function updateSelectionMeta() {
   elements.selectionError.textContent = message;
 }
 
-function renderRunList() {
-  elements.runList.innerHTML = "";
-  if (!state.runs.length) {
-    const empty = document.createElement("p");
-    empty.className = "cross-panel-note";
-    empty.textContent = "No metrics logs found in the configured log directory.";
-    elements.runList.appendChild(empty);
+function currentTimeCutoffMs() {
+  const now = Date.now();
+  const windows = {
+    "30m": 30 * 60 * 1000,
+    "1h": 60 * 60 * 1000,
+    "1d": 24 * 60 * 60 * 1000,
+    "3d": 3 * 24 * 60 * 60 * 1000,
+    "7d": 7 * 24 * 60 * 60 * 1000,
+  };
+  const duration = windows[state.filters.timeWindow];
+  return duration ? now - duration : null;
+}
+
+function visibleRuns() {
+  const cutoff = currentTimeCutoffMs();
+  const filtered = state.runs.filter((run) => {
+    if (state.filters.modelIds.size && !state.filters.modelIds.has(run.model_id)) {
+      return false;
+    }
+    if (state.filters.layerCounts.size && !state.filters.layerCounts.has(String(run.layer_count))) {
+      return false;
+    }
+    if (state.filters.promptModes.size && !state.filters.promptModes.has(run.prompt_mode)) {
+      return false;
+    }
+    if (cutoff !== null && parseTimestamp(run.timestamp) < cutoff) {
+      return false;
+    }
+    return true;
+  });
+
+  const comparators = {
+    timestamp_desc: (left, right) => parseTimestamp(right.timestamp) - parseTimestamp(left.timestamp),
+    timestamp_asc: (left, right) => parseTimestamp(left.timestamp) - parseTimestamp(right.timestamp),
+    model_asc: (left, right) => left.model_label.localeCompare(right.model_label) || parseTimestamp(right.timestamp) - parseTimestamp(left.timestamp),
+    model_desc: (left, right) => right.model_label.localeCompare(left.model_label) || parseTimestamp(right.timestamp) - parseTimestamp(left.timestamp),
+  };
+  filtered.sort(comparators[state.filters.sort] || comparators.timestamp_desc);
+  return filtered;
+}
+
+function renderCheckboxFilter(container, options, selectedSet, valueKey, labelKey) {
+  container.innerHTML = "";
+  options.forEach((option) => {
+    const item = document.createElement("label");
+    item.className = "cross-filter-item";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = selectedSet.has(String(option[valueKey]));
+    input.addEventListener("change", () => {
+      const value = String(option[valueKey]);
+      if (input.checked) {
+        selectedSet.add(value);
+      } else {
+        selectedSet.delete(value);
+      }
+      renderRunList();
+      updateSelectionMeta();
+    });
+    const text = document.createElement("span");
+    text.textContent = option[labelKey];
+    item.appendChild(input);
+    item.appendChild(text);
+    container.appendChild(item);
+  });
+}
+
+function renderFilters() {
+  const models = Array.from(new Map(state.runs.map((run) => [run.model_id, { model_id: run.model_id, model_label: run.model_label }])).values())
+    .sort((left, right) => left.model_label.localeCompare(right.model_label));
+  const layerCounts = Array.from(new Set(state.runs.map((run) => run.layer_count)))
+    .sort((left, right) => left - right)
+    .map((layerCount) => ({ layer_count: layerCount, label: `${layerCount} layers` }));
+  const promptModes = Array.from(new Set(state.runs.map((run) => run.prompt_mode)))
+    .sort()
+    .map((promptMode) => ({ prompt_mode: promptMode, label: promptMode === "chat" ? "chat" : "base" }));
+
+  renderCheckboxFilter(elements.modelFilterOptions, models, state.filters.modelIds, "model_id", "model_label");
+  renderCheckboxFilter(elements.layerFilterOptions, layerCounts, state.filters.layerCounts, "layer_count", "label");
+  renderCheckboxFilter(elements.modeFilterOptions, promptModes, state.filters.promptModes, "prompt_mode", "label");
+}
+
+function openDialog(dialog) {
+  if (typeof dialog.showModal === "function") {
+    if (!dialog.open) {
+      dialog.showModal();
+    }
     return;
   }
+  dialog.setAttribute("open", "open");
+}
+
+function closeDialog(dialog) {
+  if (typeof dialog.close === "function") {
+    dialog.close();
+    return;
+  }
+  dialog.removeAttribute("open");
+}
+
+function clearAllFilters() {
+  state.filters.sort = "timestamp_desc";
+  state.filters.timeWindow = "all";
+  state.filters.modelIds.clear();
+  state.filters.layerCounts.clear();
+  state.filters.promptModes.clear();
+  elements.sortSelect.value = "timestamp_desc";
+  elements.timeFilterSelect.value = "all";
+  renderFilters();
+  renderRunList();
+  updateSelectionMeta();
+}
+
+function renderRunList() {
+  elements.runList.innerHTML = "";
+  const runs = visibleRuns();
+  if (!runs.length) {
+    const empty = document.createElement("p");
+    empty.className = "cross-panel-note";
+    empty.textContent = state.runs.length ? "No logged runs match the active filters." : "No metrics logs found in the configured log directory.";
+    elements.runList.appendChild(empty);
+    elements.runCount.textContent = `${state.runs.length} total • 0 visible`;
+    elements.selectAllButton.setAttribute("aria-label", "Select all visible");
+    elements.selectAllButton.setAttribute("title", "Select all visible");
+    elements.selectAllIcon.textContent = "check_box_outline_blank";
+    return;
+  }
+  elements.runCount.textContent = `${state.runs.length} total • ${runs.length} visible`;
+  const allVisibleSelected = runs.every((run) => ensureSelection(run.run_id).checked);
+  elements.selectAllButton.setAttribute("aria-label", allVisibleSelected ? "Deselect all visible" : "Select all visible");
+  elements.selectAllButton.setAttribute("title", allVisibleSelected ? "Deselect all visible" : "Select all visible");
+  elements.selectAllIcon.textContent = allVisibleSelected ? "check_box" : "check_box_outline_blank";
 
   const compareGroups = elements.modeSelect.value === "compare_groups";
-  state.runs.forEach((run) => {
+  runs.forEach((run) => {
     const selection = ensureSelection(run.run_id);
     const card = document.createElement("label");
     card.className = "run-card";
@@ -493,7 +641,7 @@ async function loadRuns() {
   setStatus("Loading", "busy");
   const payload = await fetchJson("/api/cross-inspect/runs");
   state.runs = payload.runs || [];
-  elements.runCount.textContent = `${state.runs.length} logged run${state.runs.length === 1 ? "" : "s"} loaded`;
+  renderFilters();
   renderRunList();
   updateSelectionMeta();
   setStatus("Ready", "ready");
@@ -542,16 +690,15 @@ async function analyzeSelection() {
 }
 
 function selectAllVisible() {
-  state.runs.forEach((run) => {
+  const runs = visibleRuns();
+  const shouldSelect = runs.some((run) => !ensureSelection(run.run_id).checked);
+  runs.forEach((run) => {
     const selection = ensureSelection(run.run_id);
-    selection.checked = true;
+    selection.checked = shouldSelect;
+    if (!shouldSelect) {
+      selection.group = "a";
+    }
   });
-  renderRunList();
-  updateSelectionMeta();
-}
-
-function clearSelections() {
-  state.selections.clear();
   renderRunList();
   updateSelectionMeta();
 }
@@ -561,9 +708,40 @@ elements.modeSelect.addEventListener("change", () => {
   updateSelectionMeta();
   clearResults();
 });
+elements.sortButton.addEventListener("click", () => openDialog(elements.sortDialog));
+elements.filterButton.addEventListener("click", () => openDialog(elements.filterDialog));
+elements.sortCloseButton.addEventListener("click", () => closeDialog(elements.sortDialog));
+elements.filterCloseButton.addEventListener("click", () => closeDialog(elements.filterDialog));
+elements.clearFiltersButton.addEventListener("click", clearAllFilters);
+elements.clearFiltersToolbarButton.addEventListener("click", clearAllFilters);
+elements.refreshRunsButton.addEventListener("click", () => {
+  loadRuns().catch((error) => {
+    setStatus("Idle", "idle");
+    elements.runCount.textContent = error.message;
+    elements.selectionError.textContent = error.message;
+  });
+});
 elements.selectAllButton.addEventListener("click", selectAllVisible);
-elements.clearSelectionButton.addEventListener("click", clearSelections);
+elements.sortSelect.addEventListener("change", () => {
+  state.filters.sort = elements.sortSelect.value;
+  renderRunList();
+});
+elements.timeFilterSelect.addEventListener("change", () => {
+  state.filters.timeWindow = elements.timeFilterSelect.value;
+  renderRunList();
+  updateSelectionMeta();
+});
 elements.analyzeButton.addEventListener("click", analyzeSelection);
+elements.sortDialog.addEventListener("click", (event) => {
+  if (event.target === elements.sortDialog) {
+    closeDialog(elements.sortDialog);
+  }
+});
+elements.filterDialog.addEventListener("click", (event) => {
+  if (event.target === elements.filterDialog) {
+    closeDialog(elements.filterDialog);
+  }
+});
 
 loadRuns().catch((error) => {
   setStatus("Idle", "idle");

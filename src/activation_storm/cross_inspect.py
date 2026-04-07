@@ -48,6 +48,7 @@ class CrossInspectRunSummary:
     log_file: str
     model_id: str
     model_label: str
+    prompt_mode: str
     layer_count: int
     prompt: str
     prompt_preview: str
@@ -61,6 +62,7 @@ class CrossInspectRunSummary:
             "log_file": self.log_file,
             "model_id": self.model_id,
             "model_label": self.model_label,
+            "prompt_mode": self.prompt_mode,
             "layer_count": self.layer_count,
             "prompt": self.prompt,
             "prompt_preview": self.prompt_preview,
@@ -352,6 +354,7 @@ class CrossInspectStore:
             log_file=log_path.name,
             model_id=str(model["id"]),
             model_label=str(model["label"]),
+            prompt_mode=str(model.get("prompt_mode", "base")),
             layer_count=layer_count,
             prompt=prompt,
             prompt_preview=_prompt_preview(prompt),
