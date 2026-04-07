@@ -41,3 +41,17 @@ Then open `http://127.0.0.1:8000`.
 Notes:
 - this visualizes activations only, not weights
 - practical prompt length is still limited by model context and available memory
+
+## Cross-Inspect
+
+![Cross-Inspect screenshot](img/screenshot_cross-inspect_2026-04-07.png)
+
+Activation Storm also includes a second dashboard, `Cross-Inspect`, for working off previously logged prompt runs instead of a live forward pass.
+
+It lets you:
+- reload logged runs without refreshing the page
+- sort and filter runs by model, layer count, prompt mode, and recency
+- aggregate multiple runs from one model
+- compare two runs or two averaged groups on a relative-depth axis
+
+Open it at `http://127.0.0.1:8000/cross-inspect` while the local server is running.

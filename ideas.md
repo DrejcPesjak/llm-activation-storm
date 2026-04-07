@@ -30,10 +30,13 @@
 - [x] Metrics dashboard - plot activation metrics across layers and tokens
 
 ## Second dashboard - "Cross-Inspect"
-- [ ] Load from first dashboard logs
-    - [ ] Average over prompts
-    - [ ] Compare two models side by side (metrics)
-    - [ ] Diff: same model, different prompts
-    - [ ] Diff: same prompt, different models
+- [x] Load from first dashboard logs
+    - [x] Average over prompts
+    - [x] Compare two models side by side (metrics)
+    - [x] Diff: same model, different prompts
+    - [x] Diff: same prompt, different models
+    - [x] Sort and filter by model, prompt, recency
+    - [ ] Absolute layer depth (if models have same number of layers)
+    - [ ] Less bold text
 
 ## Third phase - AutoML using activation metrics
